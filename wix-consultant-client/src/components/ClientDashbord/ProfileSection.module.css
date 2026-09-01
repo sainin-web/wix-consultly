@@ -1,0 +1,115 @@
+.profileSection {
+  padding: 64px 100px;
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;   /* IMPORTANT */
+  /* background-color: #fafafa; */
+}
+
+.profileRight {
+  flex: 1;
+  padding: 20px 24px;
+  background-color: #ffffff;
+  border-radius: 12px;
+  display: block;   /* 🔥 remove column flex */
+}
+.profileSectionHeader {
+  width: 300px;
+  flex-shrink: 0;
+  padding: 20px 24px;
+  background-color: #ffffff;
+  border-radius: 12px;
+  display: block;
+}
+
+
+.profileImageContainer {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 10px;
+}
+
+.profileTitle {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 0;
+    color: #111827;
+    /* padding: 10px; */
+}
+
+.profileImage {
+    width: 150px;
+    height: 150px;
+    border-radius: 50%;
+    /* overflow: hidden; */
+    /* border: 1px solid blue; */
+}
+
+.profileNav {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap; 
+    margin-bottom: 16px;
+    border-bottom: 1px solid #e5e7eb;
+    padding-bottom: 8px;
+}
+
+.profileNavButton {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: none;
+    background-color: transparent;
+    color: #6b7280;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.profileNavButton:hover {
+    background-color: #eff6ff;
+    color: #313232;
+}
+
+.profileNavButtonActive {
+    background-color: #0a0a09;
+    color: #f6f6f6;
+}
+
+
+.profileContent {
+  margin-top: 16px;
+}
+
+
+/* =============== MOBILE RESPONSIVE =============== */
+@media (max-width: 768px) {
+
+    .profileSection {
+      flex-direction: column;
+      padding: 12px;
+    }
+  
+    .profileSectionHeader {
+      width: 100%;
+      padding: 16px;
+    }
+  
+    .profileImage {
+      width: 90px;
+      height: 90px;
+    }
+  
+    .profileRight {
+      width: 100%;
+      padding: 16px;
+      margin-top: 12px;
+    }
+  
+    .profileContent {
+      margin-top: 12px;
+    }
+  }
+  

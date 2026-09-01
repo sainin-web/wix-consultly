@@ -1,0 +1,754 @@
+/* Video Calling Page Styles */
+.videoCallContainer {
+    width: 100vw;
+    height: 100vh;
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    overflow: hidden;
+    z-index: 9999;
+}
+
+/* Call Header */
+.callHeader {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    padding: 16px 20px;
+    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.7), transparent);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    z-index: 10;
+    /* border: 2px solid blue; */
+}
+
+.callHeaderLeft {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex: 1;
+}
+
+.callHeaderRight {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+.callTimer {
+    font-size: 18px;
+    font-weight: 600;
+    color: white;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 1px;
+    padding: 8px 16px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 20px;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.backButton {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    backdrop-filter: blur(10px);
+}
+
+.backButton:hover {
+    background: rgba(255, 255, 255, 0.3);
+    transform: scale(1.05);
+}
+
+.callInfo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: white;
+}
+
+.callAvatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 18px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.callName {
+    font-size: 18px;
+    font-weight: 600;
+    color: white;
+    margin-bottom: 4px;
+}
+
+.callStatus {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+/* Video Area */
+.videoArea {
+    flex: 1;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+    overflow: hidden;
+}
+
+/* Remote Video (Main) - Full Screen */
+.remoteVideo {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+}
+
+.videoElement {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    background: #000;
+}
+
+.videoPlaceholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    color: white;
+}
+
+.avatarLarge {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 48px;
+    border: 4px solid rgba(255, 255, 255, 0.2);
+}
+
+.videoPlaceholderText {
+    font-size: 20px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+    margin: 0;
+}
+
+.videoPlaceholderTextSmall {
+    font-size: 10px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.7);
+    margin: 4px 0 0 0;
+    text-align: center;
+}
+
+/* Local Video (Small) - Instagram Style Corner Overlay */
+.localVideo {
+    position: absolute;
+    bottom: 100px;
+    right: 20px;
+    width: 120px;
+    height: 160px;
+    min-width: 120px;
+    min-height: 160px;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 2px solid rgba(255, 255, 255, 0.5);
+    background: #2a2a2a;
+    z-index: 5;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.localVideo:hover {
+    transform: scale(1.05);
+    border-color: rgba(255, 255, 255, 0.8);
+    box-shadow: 0 6px 30px rgba(0, 0, 0, 0.7);
+}
+
+.localVideo .videoElement {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.videoPlaceholderSmall {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #2a2a2a;
+}
+
+.avatarSmall {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #25d366 0%, #20ba5a 100%);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 18px;
+}
+
+/* Call Controls */
+.callControls {
+    position: absolute;
+    bottom: 5%;
+    left: 0;
+    right: 0;
+    padding: 24px;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.8), transparent);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 20px;
+    z-index: 10;
+}
+
+.controlButton {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    backdrop-filter: blur(10px);
+}
+
+.controlButton:hover {
+    background: rgba(255, 255, 255, 0.3);
+    transform: scale(1.1);
+}
+
+.controlButton:active {
+    transform: scale(0.95);
+}
+
+.controlButtonActive {
+    background: rgba(239, 68, 68, 0.3) !important;
+    border: 2px solid rgba(239, 68, 68, 0.5);
+}
+
+.controlButtonActive:hover {
+    background: rgba(239, 68, 68, 0.4) !important;
+}
+
+.endCallButton {
+    background: #ef4444;
+    width: 64px;
+    height: 64px;
+}
+
+.endCallButton:hover {
+    background: #dc2626;
+    transform: scale(1.1);
+}
+
+/* Responsive Design - Tablet */
+@media (max-width: 1024px) {
+    .callHeader {
+        padding: 14px 18px;
+    }
+
+
+
+
+    .callInfo {
+        gap: 10px;
+    }
+
+    .callAvatar {
+        width: 44px;
+        height: 44px;
+        font-size: 17px;
+    }
+
+    .callName {
+        font-size: 17px;
+    }
+
+    .callStatus {
+        font-size: 13px;
+    }
+
+    .avatarLarge {
+        width: 110px;
+        height: 110px;
+        font-size: 44px;
+    }
+
+    .videoPlaceholderText {
+        font-size: 19px;
+    }
+
+    .localVideo {
+        width: 100%;
+        height: 80%;    
+        bottom: 90px;
+        right: 18px;
+        /* border: 1px solid blue; */
+    }
+
+    .avatarSmall {
+        width: 55px;
+        height: 55px;
+        font-size: 17px;
+    }
+
+    .callControls {
+        padding: 22px 18px;
+        gap: 18px;
+    }
+
+    .controlButton {
+        width: 52px;
+        height: 52px;
+    }
+
+    .controlButton svg {
+        width: 22px;
+        height: 22px;
+    }
+
+    .endCallButton {
+        width: 60px;
+        height: 60px;
+    }
+}
+
+/* Responsive Design - Mobile (Tablet Portrait) */
+@media (max-width: 768px) {
+    .callHeader {
+        padding: 12px 16px;
+        gap: 12px;
+        border: 2px solid blue;
+    }
+
+    .backButton {
+        width: 40px;
+        height: 40px;
+    }
+
+    .backButton svg {
+        width: 20px;
+        height: 20px;
+    }
+
+    .callInfo {
+        gap: 10px;
+    }
+
+    .callAvatar {
+        width: 40px;
+        height: 40px;
+        font-size: 16px;
+    }
+
+    .callName {
+        font-size: 16px;
+        margin-bottom: 2px;
+    }
+
+    .callStatus {
+        font-size: 12px;
+    }
+
+    .avatarLarge {
+        width: 100px;
+        height: 100px;
+        font-size: 40px;
+        border-width: 3px;
+    }
+
+    .videoPlaceholderText {
+        font-size: 18px;
+        /* border: 2px solid blue; */
+    }
+
+    .localVideo {
+        width: 100px;
+        height: 133px;
+        bottom: 80px;
+        right: 16px;
+        border-width: 2px;
+    }
+
+    .avatarSmall {
+        width: 50px;
+        height: 50px;
+        font-size: 16px;
+    }
+
+    .callControls {
+        padding: 20px 16px;
+        gap: 16px;
+    }
+
+    .controlButton {
+        width: 48px;
+        height: 48px;
+    }
+
+    .controlButton svg {
+        width: 20px;
+        height: 20px;
+    }
+
+    .endCallButton {
+        width: 56px;
+        height: 56px;
+    }
+
+    .endCallButton svg {
+        width: 22px;
+        height: 22px;
+    }
+}
+
+/* Responsive Design - Small Mobile */
+@media (max-width: 576px) {
+    .callHeader {
+        /* padding: 10px 12px; */
+        gap: 10px;
+    }
+
+    .videoArea {
+        height: 80%;
+        /* border: 1px solid blue; */
+    }
+
+    .remoteVideo {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+    }
+
+    .videoElement {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    .backButton {
+        width: 36px;
+        height: 36px;
+        margin-top: -10px;
+    }
+
+    .backButton svg {
+        width: 18px;
+        height: 18px;
+    }
+
+    .callInfo {
+        gap: 8px;
+    }
+
+    .callAvatar {
+        width: 36px;
+        height: 36px;
+        font-size: 14px;
+        border-width: 1.5px;
+    }
+
+    .callName {
+        font-size: 14px;
+        margin-bottom: 2px;
+    }
+
+    .callStatus {
+        font-size: 11px;
+    }
+
+    .avatarLarge {
+        width: 130px;
+        height: 130px;
+        font-size: 32px;
+        border-width: 3px;
+    }
+
+    .videoPlaceholderText {
+        font-size: 16px;
+    }
+
+    .videoPlaceholder {
+        gap: 12px;
+    }
+
+    .localVideo {
+        width: 100px;
+        height: 75px;
+        bottom: 70px;
+        right: 12px;
+        border-width: 2px;
+    }
+
+    .avatarSmall {
+        width: 45px;
+        height: 45px;
+        font-size: 14px;
+    }
+
+    .callControls {
+        padding: 16px 12px;
+        gap: 12px;
+        margin-bottom: 40px;
+    }
+
+    .controlButton {
+        width: 44px;
+        height: 44px;
+    }
+
+    .controlButton svg {
+        width: 18px;
+        height: 18px;
+    }
+
+    .endCallButton {
+        width: 52px;
+        height: 52px;
+    }
+
+    .endCallButton svg {
+        width: 20px;
+        height: 20px;
+    }
+}
+
+/* Responsive Design - Extra Small Mobile */
+@media (max-width: 400px) {
+    .callHeader {
+        padding: 8px 10px;
+        gap: 8px;
+    }
+
+    .backButton {
+        width: 32px;
+        height: 32px;
+    }
+
+    .backButton svg {
+        width: 16px;
+        height: 16px;
+    }
+
+    .callInfo {
+        gap: 6px;
+    }
+
+    .callAvatar {
+        width: 32px;
+        height: 32px;
+        font-size: 12px;
+    }
+
+    .callName {
+        font-size: 13px;
+    }
+
+    .callStatus {
+        font-size: 10px;
+    }
+
+    .avatarLarge {
+        width: 70px;
+        height: 70px;
+        font-size: 28px;
+    }
+
+    .videoPlaceholderText {
+        font-size: 14px;
+    }
+
+    .localVideo {
+        width: 90px;
+        height: 68px;
+        bottom: 65px;
+        right: 10px;
+    }
+
+    .avatarSmall {
+        width: 40px;
+        height: 40px;
+        font-size: 12px;
+    }
+
+    .callControls {
+        padding: 14px 10px;
+        gap: 10px;
+    }
+
+    .controlButton {
+        width: 40px;
+        height: 40px;
+    }
+
+    .controlButton svg {
+        width: 16px;
+        height: 16px;
+    }
+
+    .endCallButton {
+        width: 48px;
+        height: 48px;
+    }
+
+    .endCallButton svg {
+        width: 18px;
+        height: 18px;
+    }
+}
+
+/* Landscape Orientation for Mobile */
+@media (max-width: 768px) and (orientation: landscape) {
+    .callHeader {
+        padding: 8px 16px;
+    }
+
+    .avatarLarge {
+        width: 90px;
+        height: 90px;
+        font-size: 36px;
+    }
+
+    .videoPlaceholderText {
+        font-size: 16px;
+    }
+
+    .localVideo {
+        width: 110px;
+        height: 82px;
+        bottom: 75px;
+        right: 14px;
+    }
+
+    .callControls {
+        padding: 16px 20px;
+        gap: 14px;
+    }
+
+    .controlButton {
+        width: 46px;
+        height: 46px;
+    }
+
+    .endCallButton {
+        width: 54px;
+        height: 54px;
+    }
+}
+
+/* Large Desktop */
+@media (min-width: 1440px) {
+    .callHeader {
+        padding: 20px 24px;
+    }
+
+    .callAvatar {
+        width: 52px;
+        height: 52px;
+        font-size: 20px;
+    }
+
+    .callName {
+        font-size: 20px;
+    }
+
+    .callStatus {
+        font-size: 15px;
+    }
+
+    .avatarLarge {
+        width: 140px;
+        height: 140px;
+        font-size: 56px;
+    }
+
+    .videoPlaceholderText {
+        font-size: 22px;
+    }
+
+    .localVideo {
+        width: 180px;
+        height: 135px;
+        bottom: 110px;
+        right: 24px;
+    }
+
+    .avatarSmall {
+        width: 70px;
+        height: 70px;
+        font-size: 20px;
+    }
+
+    .callControls {
+        padding: 28px 24px;
+        gap: 24px;
+    }
+
+    .controlButton {
+        width: 60px;
+        height: 60px;
+    }
+
+    .controlButton svg {
+        width: 26px;
+        height: 26px;
+    }
+
+    .endCallButton {
+        width: 68px;
+        height: 68px;
+    }
+}

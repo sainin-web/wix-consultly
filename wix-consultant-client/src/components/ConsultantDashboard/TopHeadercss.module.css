@@ -1,0 +1,383 @@
+/* Top Header - Fixed at very top */
+.topHeader {
+    position: sticky;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    background: #f5f6fa;
+    border-bottom: 1px solid transparent;
+    flex-shrink: 0;
+}
+
+.headerInner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 20px;
+    gap: 16px;
+    width: 100%;
+    max-width: 100%;
+    margin: 0 auto;
+    background: #ffffff;
+    border-radius: 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); /* match dashboard stat cards */
+}
+
+/* Left section: Logo + Hamburger + Dashboard */
+.headerLeft {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+    min-width: 0;
+}
+
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.logoIcon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.logoLetter {
+    font-size: 22px;
+    font-weight: 700;
+    color: white;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.brandName {
+    font-size: 18px;
+    font-weight: 700;
+    color: #212529;
+}
+
+.hamburgerBtn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: #6c757d;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: all 0.2s;
+}
+
+.hamburgerBtn:hover {
+    background: #f1f3f5;
+    color: #212529;
+}
+
+.dashboardLabel {
+    font-size: 14px;
+    font-weight: 600;
+    color: #6c757d;
+}
+
+/* Current page meta (title + subtitle) — no longer used */
+.pageMeta,
+.pageTitle,
+.pageSubtitle {
+    display: none;
+}
+
+/* Right section: Search + Icons + Profile */
+.headerRight {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex: 1;
+    justify-content: flex-end;
+    min-width: 0;
+}
+
+.searchBox {
+    position: relative;
+    flex: 1;
+    max-width: 320px;
+    min-width: 160px;
+}
+
+.searchIcon {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #6c757d;
+    pointer-events: none;
+}
+
+.searchInput {
+    width: 100%;
+    padding: 9px 14px 9px 42px;
+    border: 1px solid #e1e5ea;
+    border-radius: 999px;
+    font-size: 14px;
+    color: #212529;
+    background: #f9fafb;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.searchInput::placeholder {
+    color: #6c757d;
+}
+
+.searchInput:focus {
+    border-color: #4f46e5;
+    background: #ffffff;
+    box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.12);
+}
+
+.iconBtn {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: #4b5563;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: all 0.2s;
+}
+
+.iconBtn:hover {
+    background: #eef2ff;
+    color: #4f46e5;
+}
+
+.badge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: #4a90e2; /* same primary blue as dashboard */
+    color: white;
+    font-size: 11px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.userProfileWrapper {
+    position: relative;
+}
+
+.userProfile {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0;
+    border-radius: 0;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    transition: background 0.2s, box-shadow 0.2s, transform 0.1s, border-color 0.2s;
+}
+
+.avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #f9fafb;
+    border: 2px solid #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    box-shadow: rgba(0, 0, 0, 0.1) 0px 4px 12px;
+    flex-shrink: 0;
+}
+
+.avatarImage {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.userInfo {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+.userName {
+    font-size: 14px;
+    font-weight: 600;
+    color: #111827;
+    line-height: 1.2;
+}
+
+.userRole {
+    font-size: 11px;
+    color: #9ca3af;
+    line-height: 1.2;
+}
+
+/* Profile dropdown card */
+.profileDropdown {
+    position: absolute;
+    top: 115%;
+    right: 0;
+    min-width: 220px;
+    background: #ffffff;
+    border-radius: 18px;
+    box-shadow: 0 20px 45px rgba(15, 23, 42, 0.22);
+    padding: 10px 0 8px;
+    z-index: 200;
+}
+
+.profileDropdownHeader {
+    display: flex;
+    align-items: center;
+    padding: 10px 16px 12px;
+    border-bottom: 1px solid #f1f3f5;
+}
+
+.profileDropdownAvatar {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: #f9fafb;
+    margin-right: 10px;
+    overflow: hidden;
+    border: 2px solid #ffffff;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.2);
+}
+
+.profileDropdownAvatarImage {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.profileDropdownInfo {
+    display: flex;
+    flex-direction: column;
+}
+
+.profileDropdownName {
+    font-size: 16px;
+    font-weight: 700;
+    color: #111827;
+    margin-bottom: 2px;
+}
+
+.profileDropdownRole {
+    font-size: 12px;
+    color: #a0aec0;
+    letter-spacing: 0.02em;
+}
+
+.profileDropdownList {
+    padding: 6px 0 2px;
+}
+
+.profileDropdownItem {
+    width: 100%;
+    padding: 8px 16px;
+    border: none;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    font-size: 14px;
+    color: #374151;
+    transition: background 0.15s, color 0.15s;
+}
+
+.profileDropdownItem:hover {
+    background: #f3f4ff;
+    color: #111827;
+}
+
+.profileDropdownIcon {
+    width: 26px;
+    height: 26px;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f3f4ff;
+}
+
+.profileDropdownIconProfile {
+    color: #f97316;
+}
+
+.profileDropdownIconInbox {
+    color: #16a34a;
+}
+
+.profileDropdownIconLogout {
+    color: #ef4444;
+}
+
+.profileDropdownLabel {
+    flex: 1;
+    text-align: left;
+}
+
+/* Responsive */
+@media (max-width: 992px) {
+    .searchBox {
+        max-width: 240px;
+    }
+}
+
+@media (max-width: 768px) {
+    .headerInner {
+        padding: 10px 16px;
+        gap: 12px;
+    }
+
+    .hamburgerBtn {
+        display: flex;
+    }
+
+    .searchBox {
+        max-width: 180px;
+        min-width: 120px;
+    }
+
+    .userInfo {
+        display: none;
+    }
+
+    .logo .brandName {
+        display: none;
+    }
+}
+
+@media (max-width: 576px) {
+    .searchBox {
+        display: none;
+    }
+
+    .headerRight {
+        gap: 12px;
+    }
+}

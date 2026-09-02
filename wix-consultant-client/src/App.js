@@ -175,15 +175,16 @@
         return;
       }
 
-      // Not logged in → block dashboard
+      // Not logged in → block dashboard (but allow if coming from Wix with instance)
       if (
         (!isLoggedIn || !token) &&
-        currentPath.startsWith("/consultant-dashboard")
+        currentPath.startsWith("/consultant-dashboard") &&
+        !instance
       ) {
         navigate(`/login${q}`, { replace: true });
         return;
       }
-    }, [location.pathname]);
+    }, [location.pathname, navigate]);
 
     const instance = searchParams.get("instance");
     const q = instance ? `?instance=${instance}` : "";

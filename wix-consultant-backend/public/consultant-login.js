@@ -307,8 +307,8 @@ import { site } from "@wix/site";
 import { members } from "@wix/members";
 
 // Auto-detect domain - works on any domain automatically
-const BACKEND = window.location.origin;
-const REACT = window.location.origin;
+const BACKEND = "https://test-wix-consultant.zend-apps.com";
+const REACT = " https://viewy-hyperintelligently-toshiko.ngrok-free.dev ";
 const wixClient = createClient({
   auth: site.auth(),
   host: site.host({

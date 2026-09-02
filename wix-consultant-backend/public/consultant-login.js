@@ -307,8 +307,7 @@ import { site } from "@wix/site";
 import { members } from "@wix/members";
 
 const BACKEND = "https://test-wix-consultant.zend-apps.com";
-const REACT = "https://viewy-hyperintelligently-toshiko.ngrok-free.dev";
-
+const REACT = "https://test-wix-consultant.zend-apps.com";
 const wixClient = createClient({
   auth: site.auth(),
   host: site.host({

@@ -1,41 +1,74 @@
 /**
  * Iframe height reporting for the Wix embed.
  *
- * ── WHY THE OLD VERSION PRODUCED BLANK SPACE ────────────────────────────────
- * The previous implementation never measured content on the dashboard. It ran:
+ * ── THE FEEDBACK LOOP THIS FILE MUST NOT RECREATE ───────────────────────────
+ * A previous version measured:
  *
- *     getDashboardIframeHeight() =
- *         max(900, window.screen.height * 0.92, viewportHeight)
+ *     max(el.scrollHeight, el.offsetHeight, rect.height,
+ *         document.documentElement.scrollHeight,   // <-- viewport-coupled
+ *         document.body.scrollHeight)              // <-- viewport-coupled
+ *     + 8                                          // <-- unconditional ratchet
  *
- * On a 1080p screen that is ~993px for EVERY page, no matter how little content
- * was rendered — so the iframe was always ~1000px tall and the leftover area
- * showed as blank space. A `clampIframeHeight()` floor of 500px meant it could
- * never shrink below that either. The CSS `min-height` rules were a companion
- * symptom, not the cause: the height was decided here, in JS, from screen size.
+ * `documentElement.scrollHeight` returns max(content, VIEWPORT) by spec. Inside
+ * an iframe the viewport IS the iframe height, so once the parent applied a new
+ * height the next measurement read that height back as if it were content:
  *
- * ── WHAT IT DOES NOW ────────────────────────────────────────────────────────
- * Measures the real rendered height of the app's content element and reports it,
- * driven by a ResizeObserver so any content change (route, API data, table rows,
- * form open/close) updates the height — upward AND downward.
+ *     measure 650 -> send 658 -> iframe 658 -> viewport 658
+ *     -> measure 658 -> send 666 -> iframe 666 -> viewport 666 -> ...
+ *
+ * It also observed `document.body`, so enlarging the iframe resized the observed
+ * element and re-triggered the observer. And the dedup threshold was 8 while the
+ * increment was +8 — `Math.abs(658-650) < 8` is false, so the guard never fired.
+ *
+ * ── THE THREE RULES THAT MAKE GROWTH IMPOSSIBLE ─────────────────────────────
+ * 1. Measure ONLY the content element's own box. Never documentElement/body
+ *    scrollHeight, never innerHeight/screen — those reflect the iframe viewport.
+ * 2. Add NOTHING to the measurement. Any constant added to a value that is fed
+ *    back will ratchet.
+ * 3. Observe ONLY the content element. Observing body couples the observer to
+ *    the viewport that the parent controls.
+ *
+ * The content element is `height: auto; min-height: 0` (see App.css), so its
+ * scrollHeight is a pure function of its content and does NOT change when the
+ * parent resizes the iframe. That is what makes the cycle terminate.
  */
 
 export const IFRAME_HEIGHT_MESSAGE = "IFRAME_HEIGHT";
 
-/**
- * Absolute floor. Deliberately tiny — just enough that a mid-render empty frame
- * does not collapse to 0px and make the widget disappear. This is NOT a layout
- * height; real pages always measure larger than this.
- */
-export const IFRAME_MIN_HEIGHT = 120;
+/** Anti-collapse floor only — not a layout height. */
+export const IFRAME_MIN_HEIGHT = 80;
 
-/** Sanity ceiling to guard against a runaway measurement feedback loop. */
+/** Guard rail against a pathological measurement. NOT the loop fix. */
 export const IFRAME_MAX_HEIGHT = 6000;
 
-/** Ignore sub-threshold jitter so we do not spam postMessage. */
-const HEIGHT_CHANGE_THRESHOLD = 8;
+/**
+ * Ignore sub-pixel jitter. Deliberately small AND unrelated to any increment,
+ * because nothing is added to the measurement any more.
+ */
+const HEIGHT_CHANGE_THRESHOLD = 2;
 
-/** Last height actually sent, so we only post on meaningful change. */
 let lastSentHeight = 0;
+
+/** Enable in the browser with: localStorage.setItem('debug_iframe_height','1') */
+function debugEnabled() {
+  try {
+    return localStorage.getItem("debug_iframe_height") === "1";
+  } catch (err) {
+    return false;
+  }
+}
+
+function debugLog(measured, reason, sent) {
+  if (!debugEnabled()) return;
+  console.log(
+    "[IFRAME HEIGHT]",
+    "measured:", measured,
+    "| lastSent:", lastSentHeight,
+    "| reason:", reason,
+    "| route:", window.location.pathname,
+    "| sent:", sent ? "YES" : "no (unchanged)",
+  );
+}
 
 export function clampIframeHeight(height) {
   return Math.min(
@@ -45,118 +78,101 @@ export function clampIframeHeight(height) {
 }
 
 /**
- * The element whose height defines the iframe height.
- * Ordered most- to least-specific; every storefront/dashboard route renders one
- * of these shells, and #root is the fallback.
+ * The single element whose content defines the iframe height.
+ * NOTE: `document.body` is intentionally absent — measuring or observing it
+ * reintroduces viewport coupling.
  */
 export function getMeasuredElement() {
   return (
     document.querySelector(".consultant-dashboard-shell") ||
     document.querySelector(".iframe-page-shell") ||
     document.getElementById("root") ||
-    document.getElementById("consultant-root") ||
-    document.body
+    document.getElementById("consultant-root")
   );
 }
 
 /**
- * Real rendered content height.
+ * Real content height of the measured element.
  *
- * Uses the max of the element's own box and the document scroll height, so
- * content that overflows the shell (or is absolutely positioned below it) is
- * still counted. No viewport or screen dimensions are involved — those are what
- * made the old version ignore content.
+ * Uses ONLY element-scoped metrics. `scrollHeight` on a non-root element is the
+ * height of its content box and is unaffected by the iframe viewport, so it
+ * cannot grow merely because the parent made the iframe taller.
  */
 export function measureIframeContentHeight() {
   const el = getMeasuredElement();
   if (!el) return IFRAME_MIN_HEIGHT;
 
-  const rect = el.getBoundingClientRect();
-
-  const height = Math.max(
-    el.scrollHeight || 0,
-    el.offsetHeight || 0,
-    Math.ceil(rect.height) || 0,
-    // Catch anything rendered outside the shell (modals, toasts, dropdowns).
-    document.documentElement?.scrollHeight || 0,
-    document.body?.scrollHeight || 0,
+  // No additive buffer: a constant added to a fed-back value ratchets.
+  return clampIframeHeight(
+    Math.max(el.scrollHeight || 0, el.offsetHeight || 0),
   );
-
-  // Small buffer so the last line of text is never clipped by rounding.
-  return clampIframeHeight(height + 8);
 }
 
 /**
  * Post the measured height to the Wix Custom Element.
- * @param {boolean} force send even if the height has not changed
+ * @param {boolean} force bypass the dedup check (used on route change so a
+ *   SMALLER height is still sent and the iframe can shrink)
+ * @param {string} reason diagnostic label
  */
-export function sendIframeHeightToParent(force = false) {
+export function sendIframeHeightToParent(force = false, reason = "observer") {
   if (window.self === window.top) return;
 
   const height = measureIframeContentHeight();
+  const changed = Math.abs(height - lastSentHeight) >= HEIGHT_CHANGE_THRESHOLD;
 
-  if (!force && Math.abs(height - lastSentHeight) < HEIGHT_CHANGE_THRESHOLD) {
-    return; // no meaningful change — stay quiet
+  if (!force && !changed) {
+    debugLog(height, reason, false);
+    return; // stable — silence is what terminates the cycle
   }
-  lastSentHeight = height;
 
+  lastSentHeight = height;
+  debugLog(height, reason, true);
   window.parent.postMessage({ type: IFRAME_HEIGHT_MESSAGE, height }, "*");
 }
 
 /**
- * Observe real content size and report height changes.
+ * Observe the content element and report height changes.
  *
- * ResizeObserver fires on any layout change of the observed element — route
- * swaps, API data arriving, rows rendering, a form opening or closing — which
- * removes the need for the old setTimeout/setInterval guessing.
+ * Only ONE element is observed. There is no MutationObserver: ResizeObserver
+ * already fires when content changes the element's box (route swaps, API rows,
+ * forms opening), and a body-wide MutationObserver was an extra feedback path.
  *
- * @returns {() => void} cleanup that disconnects every listener
+ * @returns {() => void} cleanup
  */
 export function observeIframeHeight() {
   if (window.self === window.top) return () => {};
 
   let frame = null;
-  const schedule = () => {
-    // Coalesce bursts into one measurement per animation frame.
-    if (frame) return;
+  const schedule = (reason) => {
+    if (frame) return; // coalesce a burst into one measurement per frame
     frame = requestAnimationFrame(() => {
       frame = null;
-      sendIframeHeightToParent();
+      sendIframeHeightToParent(false, reason);
     });
   };
 
-  // Initial measurement — force it so the first height always lands.
-  sendIframeHeightToParent(true);
+  sendIframeHeightToParent(true, "initial");
 
   let ro = null;
   if (typeof ResizeObserver !== "undefined") {
-    ro = new ResizeObserver(schedule);
     const el = getMeasuredElement();
-    if (el) ro.observe(el);
-    // body too: catches content rendered outside the shell.
-    if (document.body && document.body !== el) ro.observe(document.body);
+    if (el) {
+      ro = new ResizeObserver(() => schedule("resize-observer"));
+      ro.observe(el);
+    }
   }
 
-  // Fallback for browsers without ResizeObserver, and for DOM swaps that do not
-  // change the observed element's own box.
-  const mo = new MutationObserver(schedule);
-  mo.observe(document.body, { childList: true, subtree: true });
-
-  window.addEventListener("resize", schedule);
-  window.addEventListener("load", schedule);
-  document.addEventListener("readystatechange", schedule);
+  const onWindowResize = () => schedule("window-resize");
+  window.addEventListener("resize", onWindowResize);
 
   return () => {
     if (frame) cancelAnimationFrame(frame);
     if (ro) ro.disconnect();
-    mo.disconnect();
-    window.removeEventListener("resize", schedule);
-    window.removeEventListener("load", schedule);
-    document.removeEventListener("readystatechange", schedule);
+    window.removeEventListener("resize", onWindowResize);
   };
 }
 
-/** Force the next send to go through, e.g. straight after a route change. */
+/** Allow the next send through even if the delta is small (used on route change). */
 export function resetIframeHeightCache() {
   lastSentHeight = 0;
 }

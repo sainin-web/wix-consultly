@@ -5242,6 +5242,7 @@ var ConsultantWidget = (() => {
         constructor() {
           super();
           this.loaded = false;
+          this._lastAppliedHeight = 0;
           this.instance = null;
           this.instanceId = null;
           this.wixMember = null;
@@ -5501,6 +5502,20 @@ var ConsultantWidget = (() => {
               const reported = Number(event.data.height);
               if (!Number.isFinite(reported) || reported <= 0) return;
               const h = Math.min(Math.max(reported, MIN_IFRAME_H), MAX_IFRAME_H);
+              if (Math.abs(h - this._lastAppliedHeight) < 2) {
+                return;
+              }
+              this._lastAppliedHeight = h;
+              if (window.__consultlyDebugHeight) {
+                console.log(
+                  "[WIDGET HEIGHT] received:",
+                  reported,
+                  "| applied:",
+                  h,
+                  "| lastApplied:",
+                  this._lastAppliedHeight
+                );
+              }
               iframe.style.height = h + "px";
               iframe.style.minHeight = "0";
               this.style.minHeight = "0";

@@ -39,6 +39,9 @@ class ConsultantLogin extends HTMLElement {
   constructor() {
     super();
     this.loaded = false;
+    // Last height actually written to iframe.style.height — guards against
+    // re-applying an identical height and retriggering the child's observer.
+    this._lastAppliedHeight = 0;
     this.instance = null;
     this.instanceId = null;
     this.wixMember = null;
@@ -357,6 +360,23 @@ class ConsultantLogin extends HTMLElement {
         // 920px forever: it could grow but never shrink, so short pages left a
         // large blank area. defaultH is now purely the pre-measurement height.
         const h = Math.min(Math.max(reported, MIN_IFRAME_H), MAX_IFRAME_H);
+
+        // Second line of defence against a resize feedback loop: never re-apply
+        // a height we already applied. Writing iframe.style.height resizes the
+        // child's viewport, so a redundant write could retrigger the child's
+        // observer. Applies to shrinking as well as growing.
+        if (Math.abs(h - this._lastAppliedHeight) < 2) {
+          return;
+        }
+        this._lastAppliedHeight = h;
+
+        if (window.__consultlyDebugHeight) {
+          console.log(
+            "[WIDGET HEIGHT] received:", reported,
+            "| applied:", h,
+            "| lastApplied:", this._lastAppliedHeight,
+          );
+        }
 
         iframe.style.height = h + "px";
         iframe.style.minHeight = "0";

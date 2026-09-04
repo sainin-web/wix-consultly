@@ -10,10 +10,10 @@ import {
 /**
  * Keeps the Wix iframe height in sync with real rendered content.
  *
- * Previously this ran a 250ms setInterval (12 times), a MutationObserver, and
- * several setTimeouts, all feeding a height that was computed from screen size
- * rather than content. It now relies on a ResizeObserver over the real content
- * element — see iframeResize.js — so no polling is needed.
+ * The observer is re-attached on every route change because the measured
+ * element differs per route (.iframe-page-shell on the storefront,
+ * .consultant-dashboard-shell on the dashboard) and React replaces the node.
+ * A single mount-time observer would end up watching a detached element.
  */
 function useAutoResizeIframe() {
   const location = useLocation();
@@ -40,18 +40,27 @@ function useAutoResizeIframe() {
     };
   }, [location.pathname]);
 
-  // One observer for the lifetime of the app.
-  useEffect(() => observeIframeHeight(), []);
-
-  /*
-   * On route change the new page may be SHORTER than the old one. Clearing the
-   * cache forces the next measurement to be sent even if the delta is small,
-   * which is what lets the iframe shrink rather than stay at its previous size.
-   */
   useEffect(() => {
+    /*
+     * Clearing the cache lets a SMALLER height through on the next send, which
+     * is what allows the iframe to shrink when moving to a shorter page. It does
+     * not itself cause a loop: the measurement is content-only, so once the page
+     * settles the value repeats and the dedup check goes quiet.
+     */
     resetIframeHeightCache();
-    const frame = requestAnimationFrame(() => sendIframeHeightToParent(true));
-    return () => cancelAnimationFrame(frame);
+
+    // Measure after the new route has painted, then attach the observer to the
+    // element that route actually rendered.
+    const frame = requestAnimationFrame(() => {
+      sendIframeHeightToParent(true, "route-change");
+    });
+
+    const disconnect = observeIframeHeight();
+
+    return () => {
+      cancelAnimationFrame(frame);
+      disconnect();
+    };
   }, [location.pathname]);
 }
 

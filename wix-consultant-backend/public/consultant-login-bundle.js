@@ -5228,6 +5228,14 @@ var ConsultantWidget = (() => {
           members: es_exports6
         }
       });
+      function withTimeout(promise, ms, label) {
+        return Promise.race([
+          promise,
+          new Promise(
+            (_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+          )
+        ]);
+      }
       var ConsultantLogin = class extends HTMLElement {
         constructor() {
           super();
@@ -5235,47 +5243,125 @@ var ConsultantWidget = (() => {
           this.instance = null;
           this.instanceId = null;
           this.wixMember = null;
-          this.accessTokenListener = wixClient.auth.getAccessTokenInjector();
+          console.log("[WIDGET] constructor START");
+          try {
+            this.accessTokenListener = wixClient.auth.getAccessTokenInjector();
+            console.log("[WIDGET] accessTokenInjector acquired");
+          } catch (err) {
+            console.error("[WIDGET] accessTokenInjector FAILED:", err.message, err.stack);
+            this.accessTokenListener = null;
+          }
+          console.log("[WIDGET] constructor END");
+        }
+        // Instance sources that do not require the Wix SDK host bridge.
+        // Used when running inside an HTML Embed iframe, where fetchWithAuth cannot work.
+        readInstanceFallback() {
+          const fromAttr = this.getAttribute("instance") || this.getAttribute("data-instance");
+          if (fromAttr) {
+            console.log("[WIDGET] instance from element attribute");
+            return fromAttr;
+          }
+          const fromUrl = new URLSearchParams(window.location.search).get("instance");
+          if (fromUrl) {
+            console.log("[WIDGET] instance from page URL");
+            return fromUrl;
+          }
+          const tag = document.querySelector('script[src*="consultly-widget"]');
+          if (tag) {
+            const q = tag.src.split("?")[1];
+            const fromTag = q && new URLSearchParams(q).get("instance");
+            if (fromTag) {
+              console.log("[WIDGET] instance from script tag query");
+              return fromTag;
+            }
+          }
+          console.warn("[WIDGET] no fallback instance available");
+          return null;
         }
         async fetchInstance() {
-          for (let i = 0; i < 8; i++) {
+          console.log("[WIDGET] fetchInstance START");
+          const ATTEMPTS = 3;
+          for (let i = 1; i <= ATTEMPTS; i++) {
             try {
-              const response = await wixClient.fetchWithAuth(
-                `${BACKEND}/api/wix/get-instance`
+              console.log(`[WIDGET] fetchWithAuth attempt ${i}/${ATTEMPTS} \u2192`, `${BACKEND}/api/wix/get-instance`);
+              const response = await withTimeout(
+                wixClient.fetchWithAuth(`${BACKEND}/api/wix/get-instance`),
+                5e3,
+                "fetchWithAuth"
               );
+              console.log("[WIDGET] fetchWithAuth returned, status:", response.status);
               if (!response.ok)
                 throw new Error(`get-instance HTTP ${response.status}`);
               const data = await response.json();
+              console.log("[WIDGET] get-instance payload:", data);
               this.instanceId = data.instanceId || data.instance || null;
               this.instance = data.instance || this.instanceId || null;
               if (this.instanceId) {
-                console.log("\u2705 Wix instance:", this.instanceId);
+                console.log("[WIDGET] fetchInstance SUCCESS:", this.instanceId);
                 return true;
               }
+              console.warn("[WIDGET] response ok but no instanceId in payload");
             } catch (err) {
-              console.warn(`\u26A0\uFE0F get-instance attempt ${i + 1} failed:`, err.message);
-              await new Promise((r) => setTimeout(r, 800));
+              console.warn(
+                `[WIDGET] fetchWithAuth attempt ${i} FAILED:`,
+                err.message
+              );
+              if (i < ATTEMPTS) await new Promise((r) => setTimeout(r, 600));
             }
           }
+          console.warn("[WIDGET] SDK path exhausted \u2014 trying fallback instance sources");
+          const fallback = this.readInstanceFallback();
+          if (fallback) {
+            this.instance = fallback;
+            this.instanceId = fallback;
+            console.log("[WIDGET] fetchInstance SUCCESS via fallback:", fallback);
+            return true;
+          }
+          console.error("[WIDGET] fetchInstance FAILED \u2014 no instance from any source");
           return false;
         }
         async connectedCallback() {
-          console.log("\u{1F504} Widget connected...");
-          await this.fetchInstance();
-          await this.waitForMember();
-          if (!this.instance) {
-            console.error("\u274C No Wix instance");
+          console.log("[WIDGET] connectedCallback START");
+          try {
+            const gotInstance = await this.fetchInstance();
+            console.log("[WIDGET] fetchInstance returned:", gotInstance, "instance:", this.instance);
+            console.log("[WIDGET] waitForMember START");
+            await this.waitForMember();
+            console.log("[WIDGET] waitForMember END, member:", this.wixMember ? this.wixMember.email : "(guest)");
+            if (!this.instance) {
+              console.error("[WIDGET] no Wix instance \u2014 iframe will load in guest mode");
+            }
+          } catch (err) {
+            console.error("[WIDGET] FATAL ERROR IN connectedCallback:", err.message);
+            console.error("[WIDGET] stack:", err.stack);
+          } finally {
+            let token = null;
+            let isLoggedIn = null;
+            try {
+              token = localStorage.getItem("token");
+              isLoggedIn = localStorage.getItem("consultant_logged_in");
+            } catch (err) {
+              console.warn("[WIDGET] localStorage unavailable (sandboxed iframe):", err.message);
+            }
+            const page = token && isLoggedIn === "true" ? "dashboard" : "login";
+            console.log("[WIDGET] createIframe START, page:", page);
+            try {
+              this.createIframe(page);
+              console.log("[WIDGET] createIframe SUCCESS");
+            } catch (err) {
+              console.error("[WIDGET] createIframe FAILED:", err.message, err.stack);
+            }
+            console.log("[WIDGET] connectedCallback END");
           }
-          const token = localStorage.getItem("token");
-          const isLoggedIn = localStorage.getItem("consultant_logged_in");
-          this.createIframe(token && isLoggedIn === "true" ? "dashboard" : "login");
         }
         async waitForMember() {
           try {
             console.log("\u{1F504} Getting current member...");
-            const response = await wixClient.members.getCurrentMember({
-              fieldsets: ["FULL"]
-            });
+            const response = await withTimeout(
+              wixClient.members.getCurrentMember({ fieldsets: ["FULL"] }),
+              5e3,
+              "getCurrentMember"
+            );
             if (!response?.member) {
               console.log("\u274C Guest user \u2014 not logged in");
               return;
@@ -5296,7 +5382,8 @@ var ConsultantWidget = (() => {
               }
             );
           } catch (err) {
-            console.error("\u274C waitForMember error:", err.message);
+            console.error("[WIDGET] waitForMember error:", err.message);
+            console.error("[WIDGET] stack:", err.stack);
           }
         }
         async _processMember(data, resolve) {
@@ -5340,7 +5427,10 @@ var ConsultantWidget = (() => {
           resolve();
         }
         createIframe(page) {
-          if (this.loaded) return;
+          if (this.loaded) {
+            console.warn("[WIDGET] createIframe SKIPPED \u2014 already loaded");
+            return;
+          }
           this.loaded = true;
           this.innerHTML = "";
           const defaultH = page === "dashboard" ? 920 : 500;
@@ -5362,6 +5452,15 @@ var ConsultantWidget = (() => {
           }
           const iframe = document.createElement("iframe");
           iframe.src = page === "dashboard" ? `${REACT}/consultant-dashboard?${params.toString()}` : `${REACT}/consultant/card?${params.toString()}`;
+          console.log("[WIDGET] iframe.src =", iframe.src);
+          iframe.addEventListener(
+            "load",
+            () => console.log("[WIDGET] iframe LOADED ok")
+          );
+          iframe.addEventListener(
+            "error",
+            (e) => console.error("[WIDGET] iframe FAILED to load", e)
+          );
           iframe.style.cssText = `width:100%; height:${defaultH}px; min-height:${defaultH}px; border:none; display:block;`;
           iframe.allow = "camera; microphone";
           window.addEventListener("message", (event) => {

@@ -27,6 +27,8 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.get("/api/our/consultant", (req, res) => {
+   console.log("\n========== WIDGET SCRIPT REQUEST ==========");
+  console.log("time    :", new Date().toISOString());
   res.setHeader("Content-Type", "application/javascript");
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.sendFile(path.join(__dirname, "public", "consultant-login-bundle.js"));

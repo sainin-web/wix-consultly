@@ -30,6 +30,13 @@ app.get("/api/our/consultant", (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.sendFile(path.join(__dirname, "public", "consultant-login-bundle.js"));
 });
+
+// Wix Custom Element Script URL — must match the Script URL configured in Wix Studio
+app.get("/consultly-widget.js", (req, res) => {
+  res.setHeader("Content-Type", "application/javascript");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.sendFile(path.join(__dirname, "public", "consultant-login-bundle.js"));
+});
 const {
   resolveWixInstanceFromAuthHeader,
 } = require("./services/wixInstanceFromToken");

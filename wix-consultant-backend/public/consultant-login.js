@@ -308,7 +308,7 @@ import { members } from "@wix/members";
 
 // Auto-detect domain - works on any domain automatically
 const BACKEND = "https://test-consultation-app.zend-apps.com";
-const REACT = " https://viewy-hyperintelligently-toshiko.ngrok-free.dev ";
+const REACT = "https://viewy-hyperintelligently-toshiko.ngrok-free.dev";
 const wixClient = createClient({
   auth: site.auth(),
   host: site.host({
@@ -531,6 +531,12 @@ class ConsultantLogin extends HTMLElement {
   }
 }
 
+// Wix Studio Custom Element tag name — must match the "Tag name" field in Wix Studio
+if (!customElements.get("consultly-widget")) {
+  customElements.define("consultly-widget", ConsultantLogin);
+}
+
+// Legacy tag — kept so sites already embedding <our-consultant> keep working
 if (!customElements.get("our-consultant")) {
-  customElements.define("our-consultant", ConsultantLogin);
+  customElements.define("our-consultant", class extends ConsultantLogin {});
 }

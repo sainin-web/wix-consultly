@@ -8,6 +8,10 @@ var ConsultantWidget = (() => {
   var __commonJS = (cb, mod) => function __require() {
     return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
   };
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
   var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
   // node_modules/@wix/sdk-context/build/browser/index.mjs
@@ -216,6 +220,15 @@ var ConsultantWidget = (() => {
   });
 
   // node_modules/@wix/sdk-runtime/build/context-v2.js
+  function contextualizeRESTModuleV2(restModule, elevated) {
+    return ((...args) => {
+      const context = resolveContext();
+      if (!context) {
+        return restModule.apply(void 0, args);
+      }
+      return context.initWixModules(restModule, elevated).apply(void 0, args);
+    });
+  }
   function contextualizeEventDefinitionModuleV2(eventDefinition) {
     const contextualMethod = ((...args) => {
       const context = resolveContext();
@@ -333,14 +346,22 @@ var ConsultantWidget = (() => {
   });
 
   // node_modules/@wix/sdk-runtime/build/constants.js
-  var RESTResponseToSDKResponseRenameMap;
+  var SDKRequestToRESTRequestRenameMap, RESTResponseToSDKResponseRenameMap, ITEMS_RESULT_PROPERTY_NAME, PAGING_METADATA_RESULT_PROPERTY_NAME, DEFAULT_LIMIT;
   var init_constants = __esm({
     "node_modules/@wix/sdk-runtime/build/constants.js"() {
+      SDKRequestToRESTRequestRenameMap = {
+        _id: "id",
+        _createdDate: "createdDate",
+        _updatedDate: "updatedDate"
+      };
       RESTResponseToSDKResponseRenameMap = {
         id: "_id",
         createdDate: "_createdDate",
         updatedDate: "_updatedDate"
       };
+      ITEMS_RESULT_PROPERTY_NAME = "items";
+      PAGING_METADATA_RESULT_PROPERTY_NAME = "pagingMetadata";
+      DEFAULT_LIMIT = 50;
     }
   });
 
@@ -652,16 +673,128 @@ var ConsultantWidget = (() => {
   });
 
   // node_modules/@wix/sdk-runtime/build/rest-modules.js
-  var DOMAINS, REGEX_CAPTURE_DOMAINS, WIX_API_DOMAINS, DEV_WIX_CODE_DOMAIN, REGEX_CAPTURE_API_DOMAINS, REGEX_CAPTURE_DEV_WIX_CODE_DOMAIN;
+  function createRESTModule(descriptor, elevated = false) {
+    return contextualizeRESTModuleV2(descriptor, elevated);
+  }
+  function toURLSearchParams(params, isComplexRequest) {
+    const flatten = flattenParams(params);
+    const isPayloadNonSerializableAsUrlSearchParams = Object.entries(flatten).some(([key, value]) => key.includes(".") || Array.isArray(value) && value.some((v) => typeof v === "object"));
+    const shouldSerializeToRParam = isComplexRequest && isPayloadNonSerializableAsUrlSearchParams;
+    if (shouldSerializeToRParam) {
+      return new URLSearchParams({ ".r": base64Encode(JSON.stringify(params)) });
+    } else {
+      return Object.entries(flatten).reduce((urlSearchParams, [key, value]) => {
+        const keyParams = Array.isArray(value) ? value : [value];
+        keyParams.forEach((param) => {
+          if (param === void 0 || param === null || Array.isArray(value) && typeof param === "object") {
+            return;
+          }
+          urlSearchParams.append(key, param);
+        });
+        return urlSearchParams;
+      }, new URLSearchParams());
+    }
+  }
+  function resolveUrl(opts) {
+    const domain = resolveDomain(opts.host);
+    const mappings = resolveMappingsByDomain(domain, opts.domainToMappings);
+    const path = injectDataIntoProtoPath(opts.protoPath, opts.data || {});
+    return resolvePathFromMappings(path, mappings);
+  }
+  function flattenParams(data, path = "") {
+    const params = {};
+    Object.entries(data).forEach(([key, value]) => {
+      const isObject2 = value !== null && typeof value === "object" && !Array.isArray(value);
+      const fieldPath = resolvePath(path, key);
+      if (isObject2) {
+        const serializedObject = flattenParams(value, fieldPath);
+        Object.assign(params, serializedObject);
+      } else {
+        params[fieldPath] = value;
+      }
+    });
+    return params;
+  }
+  function resolvePath(path, key) {
+    return `${path}${path ? "." : ""}${key}`;
+  }
+  function resolveDomain(host) {
+    const resolvedHost = fixHostExceptions(host);
+    return resolvedHost.replace(REGEX_CAPTURE_DOMAINS, "._base_domain_").replace(REGEX_CAPTURE_API_DOMAINS, "._api_base_domain_").replace(REGEX_CAPTURE_DEV_WIX_CODE_DOMAIN, "*.dev.wix-code.com");
+  }
+  function fixHostExceptions(host) {
+    return host.replace("create.editorx.com", "editor.editorx.com");
+  }
+  function resolveMappingsByDomain(domain, domainToMappings) {
+    const mappings = domainToMappings[domain] || domainToMappings[USER_DOMAIN];
+    if (mappings) {
+      return mappings;
+    }
+    const rootDomainMappings = resolveRootDomain(domain, domainToMappings);
+    if (!rootDomainMappings) {
+      if (isBaseDomain(domain)) {
+        return domainToMappings[wwwBaseDomain];
+      }
+    }
+    return rootDomainMappings ?? [];
+  }
+  function resolveRootDomain(domain, domainToMappings) {
+    return Object.entries(domainToMappings).find(([entryDomain]) => {
+      const [, ...rooDomainSegments] = domain.split(".");
+      return rooDomainSegments.join(".") === entryDomain;
+    })?.[1];
+  }
+  function isBaseDomain(domain) {
+    return !!domain.match(/\._base_domain_$/);
+  }
+  function injectDataIntoProtoPath(protoPath, data) {
+    return protoPath.split("/").map((path) => maybeProtoPathToData(path, data)).join("/");
+  }
+  function maybeProtoPathToData(protoPath, data) {
+    const protoRegExpMatch = protoPath.match(REGEX_CAPTURE_PROTO_FIELD) || [];
+    const field = protoRegExpMatch[1];
+    if (field) {
+      const suffix = protoPath.replace(protoRegExpMatch[0], "");
+      return findByPath(data, field, protoPath, suffix);
+    }
+    return protoPath;
+  }
+  function findByPath(obj, path, defaultValue, suffix) {
+    let result = obj;
+    for (const field of path.split(".")) {
+      if (!result) {
+        return defaultValue;
+      }
+      result = result[field];
+    }
+    return `${result}${suffix}`;
+  }
+  function resolvePathFromMappings(protoPath, mappings) {
+    const mapping = mappings?.find((m) => protoPath.startsWith(m.destPath));
+    if (!mapping) {
+      return protoPath;
+    }
+    return mapping.srcPath + protoPath.slice(mapping.destPath.length);
+  }
+  var base64Encode, DOMAINS, USER_DOMAIN, REGEX_CAPTURE_DOMAINS, WIX_API_DOMAINS, DEV_WIX_CODE_DOMAIN, REGEX_CAPTURE_PROTO_FIELD, REGEX_CAPTURE_API_DOMAINS, REGEX_CAPTURE_DEV_WIX_CODE_DOMAIN, wwwBaseDomain;
   var init_rest_modules2 = __esm({
     "node_modules/@wix/sdk-runtime/build/rest-modules.js"() {
+      init_context_v2();
       init_constants();
+      base64Encode = (value) => {
+        const bytes = new TextEncoder().encode(value);
+        const base64 = typeof btoa !== "undefined" ? btoa(String.fromCodePoint(...bytes)) : Buffer.from(value, "utf-8").toString("base64");
+        return base64.replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+      };
       DOMAINS = ["wix.com", "editorx.com"];
+      USER_DOMAIN = "_";
       REGEX_CAPTURE_DOMAINS = new RegExp(`\\.(${DOMAINS.join("|")})$`);
       WIX_API_DOMAINS = ["42.wixprod.net", "uw2-edt-1.wixprod.net"];
       DEV_WIX_CODE_DOMAIN = "dev.wix-code.com";
+      REGEX_CAPTURE_PROTO_FIELD = /{(.*)}/;
       REGEX_CAPTURE_API_DOMAINS = new RegExp(`\\.(${WIX_API_DOMAINS.join("|")})$`);
       REGEX_CAPTURE_DEV_WIX_CODE_DOMAIN = new RegExp(`.*\\.${DEV_WIX_CODE_DOMAIN}$`);
+      wwwBaseDomain = "www._base_domain_";
     }
   });
 
@@ -1447,6 +1580,9 @@ var ConsultantWidget = (() => {
     }
     return transformedKey;
   }
+  function renameKeysFromSDKRequestToRESTRequest(payload, ignorePaths = []) {
+    return renameAllNestedKeys(payload, SDKRequestToRESTRequestRenameMap, ignorePaths);
+  }
   function renameKeysFromRESTResponseToSDKResponse(payload, ignorePaths = []) {
     return renameAllNestedKeys(payload, RESTResponseToSDKResponseRenameMap, ignorePaths);
   }
@@ -1457,6 +1593,9 @@ var ConsultantWidget = (() => {
   });
 
   // node_modules/@wix/sdk-runtime/build/transformations/timestamp.js
+  function transformSDKTimestampToRESTTimestamp(val) {
+    return val?.toISOString();
+  }
   function transformRESTTimestampToSDKTimestamp(val) {
     return val ? new Date(val) : void 0;
   }
@@ -1540,6 +1679,24 @@ var ConsultantWidget = (() => {
   var init_es2 = __esm({
     "node_modules/@wix/redirects/build/es/index.mjs"() {
       init_es();
+    }
+  });
+
+  // node_modules/@wix/sdk-runtime/build/transformations/float.js
+  function transformRESTFloatToSDKFloat(val) {
+    if (val === "NaN") {
+      return NaN;
+    }
+    if (val === "Infinity") {
+      return Infinity;
+    }
+    if (val === "-Infinity") {
+      return -Infinity;
+    }
+    return val;
+  }
+  var init_float = __esm({
+    "node_modules/@wix/sdk-runtime/build/transformations/float.js"() {
     }
   });
 
@@ -1790,18 +1947,3286 @@ var ConsultantWidget = (() => {
     }
   });
 
+  // node_modules/@wix/auto_sdk_members_badges/build/es/index.mjs
+  var onBadgeAssigned, onBadgeUnassigned, onBadgeAssigned2, onBadgeUnassigned2;
+  var init_es8 = __esm({
+    "node_modules/@wix/auto_sdk_members_badges/build/es/index.mjs"() {
+      init_rename_all_nested_keys();
+      init_timestamp();
+      init_transform_paths();
+      init_browser2();
+      init_event_definition_modules();
+      onBadgeAssigned = EventDefinition(
+        "wix.badges.v3.badge_badge_assigned",
+        true,
+        (event) => renameKeysFromRESTResponseToSDKResponse(
+          transformPaths(event, [
+            {
+              transformFn: transformRESTTimestampToSDKTimestamp,
+              paths: [{ path: "metadata.eventTime" }]
+            }
+          ])
+        )
+      )();
+      onBadgeUnassigned = EventDefinition(
+        "wix.badges.v3.badge_badge_unassigned",
+        true,
+        (event) => renameKeysFromRESTResponseToSDKResponse(
+          transformPaths(event, [
+            {
+              transformFn: transformRESTTimestampToSDKTimestamp,
+              paths: [{ path: "metadata.eventTime" }]
+            }
+          ])
+        )
+      )();
+      onBadgeAssigned2 = createEventModule(onBadgeAssigned);
+      onBadgeUnassigned2 = createEventModule(onBadgeUnassigned);
+    }
+  });
+
+  // node_modules/@wix/sdk-runtime/build/transformations/image.js
+  function transformRESTImageToSDKImage(payload) {
+    if (!payload) {
+      return;
+    }
+    let fileNameOrAltText = "";
+    if (payload.filename || payload.altText) {
+      fileNameOrAltText = `/${encodeURIComponent(payload.filename || payload.altText)}`;
+    }
+    return payload.id ? `wix:image://v1/${payload.id}${fileNameOrAltText}#originWidth=${payload.width}&originHeight=${payload.height}` : payload.url;
+  }
+  var init_image = __esm({
+    "node_modules/@wix/sdk-runtime/build/transformations/image.js"() {
+    }
+  });
+
+  // node_modules/@wix/sdk-runtime/build/query-filter.js
+  function isAndOperator(filter) {
+    return Object.keys(filter).length === 1 && "$and" in filter && Array.isArray(filter.$and);
+  }
+  function isOrOperator(filter) {
+    return Object.keys(filter).length === 1 && "$or" in filter && Array.isArray(filter.$or);
+  }
+  function isNotOperator(filter) {
+    return Object.keys(filter).length === 1 && "$not" in filter && typeof filter.$not === "object";
+  }
+  function and(a, b) {
+    if (typeof a === "undefined" || Object.keys(a).length === 0) {
+      return b;
+    } else if (typeof b === "undefined" || Object.keys(b).length === 0) {
+      return a;
+    } else {
+      return {
+        $and: [
+          ...isAndOperator(a) ? a.$and : [a],
+          ...isAndOperator(b) ? b.$and : [b]
+        ]
+      };
+    }
+  }
+  function or(a, b) {
+    if (typeof a === "undefined" || Object.keys(a).length === 0) {
+      return b;
+    } else if (typeof b === "undefined" || Object.keys(b).length === 0) {
+      return a;
+    } else {
+      return {
+        $or: [
+          ...isOrOperator(a) ? a.$or : [a],
+          ...isOrOperator(b) ? b.$or : [b]
+        ]
+      };
+    }
+  }
+  function not(a) {
+    if (typeof a === "undefined" || Object.keys(a).length === 0) {
+      return void 0;
+    } else if (isNotOperator(a)) {
+      return a.$not;
+    } else {
+      return { $not: a };
+    }
+  }
+  var init_query_filter = __esm({
+    "node_modules/@wix/sdk-runtime/build/query-filter.js"() {
+    }
+  });
+
+  // node_modules/@wix/sdk-runtime/build/query-iterators.js
+  var Iterator, CursorBasedIterator, OffsetBasedIterator;
+  var init_query_iterators = __esm({
+    "node_modules/@wix/sdk-runtime/build/query-iterators.js"() {
+      Iterator = class {
+        constructor({ items, originQuery, fetchNextPage, fetchPrevPage, limit }) {
+          __publicField(this, "_items");
+          __publicField(this, "_fetchNextPage");
+          __publicField(this, "_fetchPrevPage");
+          __publicField(this, "_originQuery");
+          __publicField(this, "_limit");
+          this._items = items;
+          this._fetchNextPage = fetchNextPage;
+          this._fetchPrevPage = fetchPrevPage;
+          this._originQuery = originQuery;
+          this._limit = limit;
+        }
+        get items() {
+          return this._items;
+        }
+        get length() {
+          return this._items.length;
+        }
+        get pageSize() {
+          return this._limit;
+        }
+        get query() {
+          return this._originQuery;
+        }
+        async next() {
+          if (!this.hasNext()) {
+            throw new Error("No next page to fetch");
+          }
+          const nextPageIterator = await this._fetchNextPage();
+          return nextPageIterator;
+        }
+        async prev() {
+          if (!this.hasPrev()) {
+            throw new Error("No previous page to fetch");
+          }
+          const previousPageIterator = await this._fetchPrevPage();
+          return previousPageIterator;
+        }
+      };
+      CursorBasedIterator = class extends Iterator {
+        constructor({ items, originQuery, fetchNextPage, fetchPrevPage, limit, nextCursor, prevCursor }) {
+          super({ items, originQuery, fetchNextPage, fetchPrevPage, limit });
+          __publicField(this, "_nextCursor");
+          __publicField(this, "_prevCursor");
+          __publicField(this, "cursors");
+          this._nextCursor = nextCursor;
+          this._prevCursor = prevCursor;
+          this.cursors = {
+            next: nextCursor,
+            prev: prevCursor
+          };
+        }
+        hasNext() {
+          return !!this._nextCursor;
+        }
+        hasPrev() {
+          return !!this._prevCursor;
+        }
+      };
+      OffsetBasedIterator = class extends Iterator {
+        constructor({ items, fetchNextPage, fetchPrevPage, offset, originQuery, limit, totalCount, tooManyToCount }) {
+          super({ items, fetchNextPage, fetchPrevPage, originQuery, limit });
+          __publicField(this, "_totalCount");
+          __publicField(this, "_offset");
+          __publicField(this, "_tooManyToCount");
+          this._totalCount = totalCount;
+          this._offset = offset;
+          this._tooManyToCount = tooManyToCount;
+        }
+        get currentPage() {
+          return this._limit === 0 ? void 0 : Math.floor(this._offset / this._limit);
+        }
+        get totalPages() {
+          return this._tooManyToCount || this._limit === 0 ? void 0 : Math.ceil(this._totalCount / this._limit);
+        }
+        get totalCount() {
+          return this._tooManyToCount ? void 0 : this._totalCount;
+        }
+        hasNext() {
+          return Boolean(this._limit !== 0 && this.currentPage !== void 0 && // currentPage 0 is the first page
+          this.totalPages !== void 0 && this.currentPage < this.totalPages - 1);
+        }
+        hasPrev() {
+          return Boolean(this._limit !== 0 && this.currentPage && this.currentPage > 0);
+        }
+      };
+    }
+  });
+
+  // node_modules/@wix/sdk-runtime/build/query-builder.js
+  function queryBuilder(opts) {
+    const createQueryBuilder = (query) => {
+      return {
+        query,
+        async find() {
+          try {
+            const request = opts.requestTransformer(opts.pagingMethod === "CURSOR" && query.cursorPaging.cursor ? {
+              cursorPaging: query.cursorPaging
+            } : query);
+            const response = await opts.func(request);
+            const { [ITEMS_RESULT_PROPERTY_NAME]: items, [PAGING_METADATA_RESULT_PROPERTY_NAME]: pagingMetadata } = opts.responseTransformer(response);
+            if (opts.pagingMethod === "OFFSET") {
+              const offsetQuery = query;
+              return new OffsetBasedIterator({
+                items: items ?? [],
+                fetchNextPage: () => {
+                  return createQueryBuilder({
+                    ...offsetQuery,
+                    paging: {
+                      offset: offsetQuery.paging.offset + offsetQuery.paging.limit,
+                      limit: offsetQuery.paging.limit
+                    }
+                  }).find();
+                },
+                fetchPrevPage: () => {
+                  return createQueryBuilder({
+                    ...query,
+                    paging: {
+                      offset: Math.max(offsetQuery.paging.offset - offsetQuery.paging.limit, 0),
+                      limit: offsetQuery.paging.limit
+                    }
+                  }).find();
+                },
+                offset: offsetQuery.paging.offset,
+                limit: offsetQuery.paging.limit,
+                totalCount: pagingMetadata?.total,
+                tooManyToCount: pagingMetadata?.tooManyToCount,
+                originQuery: this
+              });
+            }
+            const paging = query.cursorPaging;
+            return new CursorBasedIterator({
+              items: items ?? [],
+              limit: paging.limit,
+              originQuery: this,
+              fetchNextPage: () => {
+                return createQueryBuilder({
+                  ...query,
+                  cursorPaging: {
+                    cursor: pagingMetadata?.cursors?.next ?? void 0,
+                    limit: paging.limit
+                  }
+                }).find();
+              },
+              fetchPrevPage: () => {
+                return createQueryBuilder({
+                  ...query,
+                  cursorPaging: {
+                    cursor: pagingMetadata?.cursors?.prev ?? void 0,
+                    limit: paging.limit
+                  }
+                }).find();
+              },
+              prevCursor: pagingMetadata?.cursors?.prev ?? void 0,
+              nextCursor: pagingMetadata?.cursors?.next ?? void 0
+            });
+          } catch (err) {
+            throw opts.errorTransformer(err);
+          }
+        },
+        skipTo(cursor) {
+          return createQueryBuilder({
+            ...query,
+            cursorPaging: {
+              cursor,
+              limit: query.cursorPaging.limit
+            }
+          });
+        },
+        eq(field, value) {
+          const serializableValue = typeof value === "undefined" ? null : value;
+          const newFilter = {
+            [renameFieldByPaths(opts.transformationPaths, field)]: serializableValue
+          };
+          return createQueryBuilder({
+            ...query,
+            filter: and(query.filter, newFilter)
+          });
+        },
+        ne(field, value) {
+          const serializableValue = typeof value === "undefined" ? null : value;
+          const newFilter = {
+            [renameFieldByPaths(opts.transformationPaths, field)]: {
+              $ne: serializableValue
+            }
+          };
+          return createQueryBuilder({
+            ...query,
+            filter: and(query.filter, newFilter)
+          });
+        },
+        ge(field, value) {
+          const newFilter = {
+            [renameFieldByPaths(opts.transformationPaths, field)]: {
+              $gte: value
+            }
+          };
+          return createQueryBuilder({
+            ...query,
+            filter: and(query.filter, newFilter)
+          });
+        },
+        gt(field, value) {
+          const newFilter = {
+            [renameFieldByPaths(opts.transformationPaths, field)]: { $gt: value }
+          };
+          return createQueryBuilder({
+            ...query,
+            filter: and(query.filter, newFilter)
+          });
+        },
+        le(field, value) {
+          const newFilter = {
+            [renameFieldByPaths(opts.transformationPaths, field)]: {
+              $lte: value
+            }
+          };
+          return createQueryBuilder({
+            ...query,
+            filter: and(query.filter, newFilter)
+          });
+        },
+        lt(field, value) {
+          const newFilter = {
+            [renameFieldByPaths(opts.transformationPaths, field)]: { $lt: value }
+          };
+          return createQueryBuilder({
+            ...query,
+            filter: and(query.filter, newFilter)
+          });
+        },
+        isNotEmpty(field) {
+          return this.ne(field, null);
+        },
+        isEmpty(field) {
+          return this.eq(field, null);
+        },
+        startsWith(field, value) {
+          const newFilter = {
+            [renameFieldByPaths(opts.transformationPaths, field)]: {
+              $startsWith: value
+            }
+          };
+          return createQueryBuilder({
+            ...query,
+            filter: and(query.filter, newFilter)
+          });
+        },
+        endsWith(field, value) {
+          const newFilter = {
+            [renameFieldByPaths(opts.transformationPaths, field)]: {
+              $endsWith: value
+            }
+          };
+          return createQueryBuilder({
+            ...query,
+            filter: and(query.filter, newFilter)
+          });
+        },
+        contains(field, value) {
+          const newFilter = {
+            [renameFieldByPaths(opts.transformationPaths, field)]: {
+              $contains: value
+            }
+          };
+          return createQueryBuilder({
+            ...query,
+            filter: and(query.filter, newFilter)
+          });
+        },
+        hasSome(field, ...values) {
+          const newFilter = {
+            [renameFieldByPaths(opts.transformationPaths, field)]: {
+              $hasSome: Array.isArray(values[0]) ? values[0] : values
+            }
+          };
+          return createQueryBuilder({
+            ...query,
+            filter: and(query.filter, newFilter)
+          });
+        },
+        hasAll(field, ...values) {
+          const newFilter = {
+            [renameFieldByPaths(opts.transformationPaths, field)]: {
+              $hasAll: Array.isArray(values[0]) ? values[0] : values
+            }
+          };
+          return createQueryBuilder({
+            ...query,
+            filter: and(query.filter, newFilter)
+          });
+        },
+        between(field, from, to) {
+          return this.ge(field, from).lt(field, to);
+        },
+        in(field, values) {
+          const newFilter = {
+            [renameFieldByPaths(opts.transformationPaths, field)]: {
+              $in: values
+            }
+          };
+          return createQueryBuilder({
+            ...query,
+            filter: and(query.filter, newFilter)
+          });
+        },
+        exists(field, value = true) {
+          const newFilter = {
+            [renameFieldByPaths(opts.transformationPaths, field)]: {
+              $exists: value
+            }
+          };
+          return createQueryBuilder({
+            ...query,
+            filter: and(query.filter, newFilter)
+          });
+        },
+        or(orQuery) {
+          return createQueryBuilder({
+            ...query,
+            filter: or(query.filter, orQuery.query.filter)
+          });
+        },
+        and(andQuery) {
+          return createQueryBuilder({
+            ...query,
+            filter: and(query.filter, andQuery.query.filter)
+          });
+        },
+        not(notQuery) {
+          return createQueryBuilder({
+            ...query,
+            filter: not(notQuery.query.filter)
+          });
+        },
+        ascending(...fieldNames) {
+          return createQueryBuilder({
+            ...query,
+            sort: [
+              ...query.sort ?? [],
+              ...fieldNames.map((fieldName) => ({
+                fieldName: renameFieldByPaths(opts.transformationPaths, fieldName),
+                order: "ASC"
+              }))
+            ]
+          });
+        },
+        descending(...fieldNames) {
+          return createQueryBuilder({
+            ...query,
+            sort: [
+              ...query.sort ?? [],
+              ...fieldNames.map((fieldName) => ({
+                fieldName: renameFieldByPaths(opts.transformationPaths, fieldName),
+                order: "DESC"
+              }))
+            ]
+          });
+        },
+        skip(offset) {
+          return createQueryBuilder({
+            ...query,
+            paging: {
+              offset,
+              limit: "limit" in query.paging ? query.paging.limit : DEFAULT_LIMIT
+            }
+          });
+        },
+        limit(limit) {
+          if (opts.pagingMethod === "CURSOR") {
+            const cursorQuery = query;
+            return createQueryBuilder({
+              ...query,
+              cursorPaging: {
+                limit,
+                cursor: "cursor" in cursorQuery.cursorPaging ? cursorQuery.cursorPaging.cursor : void 0
+              }
+            });
+          }
+          const offsetQuery = query;
+          return createQueryBuilder({
+            ...query,
+            paging: {
+              limit,
+              offset: "offset" in offsetQuery.paging ? offsetQuery.paging.offset : 0
+            }
+          });
+        }
+      };
+    };
+    return createQueryBuilder({
+      filter: {},
+      ...opts.pagingMethod === "OFFSET" ? { paging: { offset: 0, limit: DEFAULT_LIMIT } } : { cursorPaging: { limit: DEFAULT_LIMIT } }
+    });
+  }
+  function renameFieldByPaths(transformationPaths, fieldPath) {
+    const transformationPath = Object.entries(transformationPaths).find(([path]) => path === fieldPath || fieldPath.startsWith(`${path}.`))?.[0];
+    if (transformationPath) {
+      return fieldPath.replace(transformationPath, transformationPaths[transformationPath]);
+    }
+    return fieldPath.split(".").map((segment) => transformationPaths[segment] ?? SDKRequestToRESTRequestRenameMap[segment] ?? segment).join(".");
+  }
+  var init_query_builder = __esm({
+    "node_modules/@wix/sdk-runtime/build/query-builder.js"() {
+      init_constants();
+      init_query_filter();
+      init_query_iterators();
+    }
+  });
+
+  // node_modules/@wix/sdk-runtime/build/wql-builder-utils.js
+  function createFieldFilter(field, existingOps = {}) {
+    const createChained = (op, value) => {
+      const newOps = { ...existingOps, [op]: value };
+      return createFieldFilter(field, newOps);
+    };
+    const getFilter = () => {
+      if (Object.keys(existingOps).length === 0) {
+        return {};
+      }
+      return { [field]: existingOps };
+    };
+    return {
+      // FilterExpression interface - makes this usable directly
+      get filter() {
+        return getFilter();
+      },
+      // Chainable methods
+      eq: (value) => createChained("$eq", value),
+      ne: (value) => createChained("$ne", value),
+      gt: (value) => createChained("$gt", value),
+      gte: (value) => createChained("$gte", value),
+      lt: (value) => createChained("$lt", value),
+      lte: (value) => createChained("$lte", value),
+      startsWith: (value) => createChained("$startsWith", value),
+      endsWith: (value) => createChained("$endsWith", value),
+      contains: (value) => createChained("$contains", value),
+      in: (values) => createChained("$in", values),
+      nin: (values) => createChained("$nin", values),
+      hasSome: (values) => createChained("$hasSome", values),
+      hasAll: (values) => createChained("$hasAll", values),
+      exists: (value = true) => createChained("$exists", value),
+      isEmpty: (value = true) => createChained("$isEmpty", value),
+      isNotEmpty: () => createChained("$ne", null)
+    };
+  }
+  function createFilterFactory() {
+    const filterFn = (field) => {
+      return createFieldFilter(field);
+    };
+    const Filter = Object.assign(filterFn, {
+      and: (...filters) => ({
+        filter: {
+          $and: filters.map((f) => f.filter)
+        }
+      }),
+      or: (...filters) => ({
+        filter: {
+          $or: filters.map((f) => f.filter)
+        }
+      }),
+      not: (filter) => ({
+        filter: { $not: filter.filter }
+      })
+    });
+    return Filter;
+  }
+  function createSortFactory() {
+    return ((field) => ({
+      asc: () => ({
+        sort: { fieldName: field, order: "ASC" }
+      }),
+      desc: () => ({
+        sort: { fieldName: field, order: "DESC" }
+      })
+    }));
+  }
+  var init_wql_builder_utils = __esm({
+    "node_modules/@wix/sdk-runtime/build/wql-builder-utils.js"() {
+    }
+  });
+
+  // node_modules/@wix/sdk-runtime/build/query-builder-utils.js
+  function createQueryBuilderFactory() {
+    return () => {
+      let state = {};
+      const builder = {
+        withFilter(filterExpr) {
+          state = { ...state, filter: filterExpr.filter };
+          return builder;
+        },
+        withFields(...fields) {
+          state = { ...state, fields };
+          return builder;
+        },
+        withSorting(...sorts) {
+          state = { ...state, sort: sorts.map((s) => s.sort) };
+          return builder;
+        },
+        withPaging(paging) {
+          state = { ...state, paging };
+          return builder;
+        },
+        build() {
+          return state;
+        }
+      };
+      return builder;
+    };
+  }
+  function createQueryUtils() {
+    return {
+      QueryBuilder: createQueryBuilderFactory(),
+      Filter: createFilterFactory(),
+      Sort: createSortFactory()
+    };
+  }
+  var init_query_builder_utils = __esm({
+    "node_modules/@wix/sdk-runtime/build/query-builder-utils.js"() {
+      init_wql_builder_utils();
+    }
+  });
+
+  // node_modules/@wix/sdk-runtime/build/query-type-guards.js
+  function hasQueryProperties(obj, queryKeys) {
+    if (!obj || typeof obj !== "object") {
+      return false;
+    }
+    const hasQueryProps = queryKeys.some((key) => obj.hasOwnProperty(key));
+    const isEmpty = Object.keys(obj).length === 0;
+    return hasQueryProps || isEmpty;
+  }
+  function isCursorQuery(obj) {
+    return hasQueryProperties(obj, CURSOR_QUERY_KEYS);
+  }
+  function isQueryV2(obj) {
+    return hasQueryProperties(obj, QUERY_V2_KEYS);
+  }
+  var FILTER, SORT, CURSOR_PAGING, PAGING, CURSOR_QUERY_KEYS, QUERY_V2_KEYS;
+  var init_query_type_guards = __esm({
+    "node_modules/@wix/sdk-runtime/build/query-type-guards.js"() {
+      FILTER = "filter";
+      SORT = "sort";
+      CURSOR_PAGING = "cursorPaging";
+      PAGING = "paging";
+      CURSOR_QUERY_KEYS = [FILTER, SORT, CURSOR_PAGING];
+      QUERY_V2_KEYS = [FILTER, SORT, PAGING];
+    }
+  });
+
+  // node_modules/@wix/sdk-runtime/build/query-method-router.js
+  function createQueryOverloadRouter(options) {
+    const { hasOptionsParameter } = options;
+    return function queryOverloadRouter(...args) {
+      return hasOptionsParameter ? routeComplexOverload(args, options) : routeSimpleOverload(args, options);
+    };
+  }
+  function routeSimpleOverload(args, options) {
+    if (args.length === 0) {
+      return options.builderQueryFunction();
+    }
+    return options.typedQueryFunction(args[0]);
+  }
+  function routeComplexOverload(args, options) {
+    switch (args.length) {
+      case 0:
+        return options.builderQueryFunction();
+      case 1:
+        return isCursorQuery(args[0]) || isQueryV2(args[0]) ? options.typedQueryFunction(args[0]) : options.builderQueryFunction(args[0]);
+      default:
+        return options.typedQueryFunction(args[0], args[1]);
+    }
+  }
+  var init_query_method_router = __esm({
+    "node_modules/@wix/sdk-runtime/build/query-method-router.js"() {
+      init_query_type_guards();
+    }
+  });
+
+  // node_modules/@wix/auto_sdk_members_badges-v-2/build/es/index.mjs
+  var utils, onBadgeCreated, onBadgeDeleted, onBadgeUpdated, onBadgeCreated2, onBadgeDeleted2, onBadgeUpdated2;
+  var init_es9 = __esm({
+    "node_modules/@wix/auto_sdk_members_badges-v-2/build/es/index.mjs"() {
+      init_rename_all_nested_keys();
+      init_image();
+      init_timestamp();
+      init_transform_paths();
+      init_browser2();
+      init_query_builder_utils();
+      init_event_definition_modules();
+      utils = {
+        query: {
+          ...createQueryUtils()
+        }
+      };
+      onBadgeCreated = EventDefinition(
+        "wix.badges.v4.badge_created",
+        true,
+        (event) => renameKeysFromRESTResponseToSDKResponse(
+          transformPaths(event, [
+            {
+              transformFn: transformRESTImageToSDKImage,
+              paths: [{ path: "entity.icon" }]
+            },
+            {
+              transformFn: transformRESTTimestampToSDKTimestamp,
+              paths: [
+                { path: "entity.createdDate" },
+                { path: "entity.updatedDate" },
+                { path: "metadata.eventTime" }
+              ]
+            }
+          ])
+        )
+      )();
+      onBadgeDeleted = EventDefinition(
+        "wix.badges.v4.badge_deleted",
+        true,
+        (event) => renameKeysFromRESTResponseToSDKResponse(
+          transformPaths(event, [
+            {
+              transformFn: transformRESTImageToSDKImage,
+              paths: [{ path: "undefined.icon" }]
+            },
+            {
+              transformFn: transformRESTTimestampToSDKTimestamp,
+              paths: [
+                { path: "undefined.createdDate" },
+                { path: "undefined.updatedDate" },
+                { path: "metadata.eventTime" }
+              ]
+            }
+          ])
+        )
+      )();
+      onBadgeUpdated = EventDefinition(
+        "wix.badges.v4.badge_updated",
+        true,
+        (event) => renameKeysFromRESTResponseToSDKResponse(
+          transformPaths(event, [
+            {
+              transformFn: transformRESTImageToSDKImage,
+              paths: [{ path: "entity.icon" }]
+            },
+            {
+              transformFn: transformRESTTimestampToSDKTimestamp,
+              paths: [
+                { path: "entity.createdDate" },
+                { path: "entity.updatedDate" },
+                { path: "metadata.eventTime" }
+              ]
+            }
+          ])
+        )
+      )();
+      onBadgeCreated2 = createEventModule(onBadgeCreated);
+      onBadgeDeleted2 = createEventModule(onBadgeDeleted);
+      onBadgeUpdated2 = createEventModule(onBadgeUpdated);
+    }
+  });
+
+  // node_modules/@wix/auto_sdk_members_badge-assignments/build/es/index.mjs
+  var utils2, onBadgeAssignmentCreated, onBadgeAssignmentDeleted, onBadgeAssignmentCreated2, onBadgeAssignmentDeleted2;
+  var init_es10 = __esm({
+    "node_modules/@wix/auto_sdk_members_badge-assignments/build/es/index.mjs"() {
+      init_rename_all_nested_keys();
+      init_timestamp();
+      init_transform_paths();
+      init_browser2();
+      init_query_builder_utils();
+      init_event_definition_modules();
+      utils2 = {
+        query: {
+          ...createQueryUtils()
+        }
+      };
+      onBadgeAssignmentCreated = EventDefinition(
+        "wix.badges.v4.badge_assignment_created",
+        true,
+        (event) => renameKeysFromRESTResponseToSDKResponse(
+          transformPaths(event, [
+            {
+              transformFn: transformRESTTimestampToSDKTimestamp,
+              paths: [
+                { path: "entity.createdDate" },
+                { path: "entity.updatedDate" },
+                { path: "metadata.eventTime" }
+              ]
+            }
+          ])
+        )
+      )();
+      onBadgeAssignmentDeleted = EventDefinition(
+        "wix.badges.v4.badge_assignment_deleted",
+        true,
+        (event) => renameKeysFromRESTResponseToSDKResponse(
+          transformPaths(event, [
+            {
+              transformFn: transformRESTTimestampToSDKTimestamp,
+              paths: [
+                { path: "entity.createdDate" },
+                { path: "entity.updatedDate" },
+                { path: "metadata.eventTime" }
+              ]
+            }
+          ])
+        )
+      )();
+      onBadgeAssignmentCreated2 = createEventModule(
+        onBadgeAssignmentCreated
+      );
+      onBadgeAssignmentDeleted2 = createEventModule(
+        onBadgeAssignmentDeleted
+      );
+    }
+  });
+
+  // node_modules/@wix/auto_sdk_members_authentication/build/es/index.mjs
+  var init_es11 = __esm({
+    "node_modules/@wix/auto_sdk_members_authentication/build/es/index.mjs"() {
+    }
+  });
+
+  // node_modules/@wix/auto_sdk_members_members-about/build/es/index.mjs
+  var utils3, onMemberAboutCreated, onMemberAboutDeleted, onMemberAboutUpdated, onMemberAboutCreated2, onMemberAboutDeleted2, onMemberAboutUpdated2;
+  var init_es12 = __esm({
+    "node_modules/@wix/auto_sdk_members_members-about/build/es/index.mjs"() {
+      init_rename_all_nested_keys();
+      init_float();
+      init_timestamp();
+      init_transform_paths();
+      init_browser2();
+      init_query_builder_utils();
+      init_event_definition_modules();
+      utils3 = {
+        query: {
+          ...createQueryUtils()
+        }
+      };
+      onMemberAboutCreated = EventDefinition(
+        "wix.members.about.v2.member_about_created",
+        true,
+        (event) => renameKeysFromRESTResponseToSDKResponse(
+          transformPaths(event, [
+            {
+              transformFn: transformRESTFloatToSDKFloat,
+              paths: [
+                {
+                  path: "entity.content.nodes.buttonData.styles.background.gradient.centerX"
+                },
+                {
+                  path: "entity.content.nodes.buttonData.styles.background.gradient.centerY"
+                },
+                {
+                  path: "entity.content.nodes.buttonData.styles.background.gradient.stops.position"
+                },
+                {
+                  path: "entity.content.nodes.buttonData.styles.backgroundHover.gradient.centerX"
+                },
+                {
+                  path: "entity.content.nodes.buttonData.styles.backgroundHover.gradient.centerY"
+                },
+                {
+                  path: "entity.content.nodes.buttonData.styles.backgroundHover.gradient.stops.position"
+                },
+                {
+                  path: "entity.content.nodes.galleryData.items.image.media.duration"
+                },
+                {
+                  path: "entity.content.nodes.galleryData.items.video.media.duration"
+                },
+                {
+                  path: "entity.content.nodes.galleryData.items.video.thumbnail.duration"
+                },
+                { path: "entity.content.nodes.galleryData.options.item.ratio" },
+                { path: "entity.content.nodes.imageData.image.duration" },
+                { path: "entity.content.nodes.mapData.mapSettings.lat" },
+                { path: "entity.content.nodes.mapData.mapSettings.lng" },
+                { path: "entity.content.nodes.pollData.poll.image.duration" },
+                {
+                  path: "entity.content.nodes.pollData.poll.options.image.duration"
+                },
+                {
+                  path: "entity.content.nodes.pollData.design.poll.background.image.duration"
+                },
+                { path: "entity.content.nodes.appEmbedData.image.duration" },
+                { path: "entity.content.nodes.videoData.video.duration" },
+                { path: "entity.content.nodes.videoData.thumbnail.duration" },
+                { path: "entity.content.nodes.audioData.audio.duration" },
+                { path: "entity.content.nodes.audioData.coverImage.duration" },
+                {
+                  path: "entity.content.nodes.layoutData.backgroundImage.media.duration"
+                },
+                {
+                  path: "entity.content.nodes.layoutData.backdropImage.media.duration"
+                },
+                {
+                  path: "entity.content.nodes.layoutData.background.gradient.centerX"
+                },
+                {
+                  path: "entity.content.nodes.layoutData.background.gradient.centerY"
+                },
+                {
+                  path: "entity.content.nodes.layoutData.background.gradient.stops.position"
+                },
+                {
+                  path: "entity.content.nodes.layoutData.backdrop.gradient.centerX"
+                },
+                {
+                  path: "entity.content.nodes.layoutData.backdrop.gradient.centerY"
+                },
+                {
+                  path: "entity.content.nodes.layoutData.backdrop.gradient.stops.position"
+                },
+                { path: "entity.content.nodes.shapeData.shape.duration" },
+                {
+                  path: "entity.content.nodes.cardData.background.gradient.centerX"
+                },
+                {
+                  path: "entity.content.nodes.cardData.background.gradient.centerY"
+                },
+                {
+                  path: "entity.content.nodes.cardData.background.gradient.stops.position"
+                },
+                {
+                  path: "entity.content.nodes.cardData.backgroundImage.media.duration"
+                },
+                { path: "entity.content.nodes.tocData.fontSize" },
+                { path: "entity.content.nodes.tocData.itemSpacing" },
+                { path: "entity.content.nodes.smartBlockCellData.shape.duration" }
+              ]
+            },
+            {
+              transformFn: transformRESTTimestampToSDKTimestamp,
+              paths: [
+                { path: "entity.content.metadata.createdTimestamp" },
+                { path: "entity.content.metadata.updatedTimestamp" },
+                { path: "metadata.eventTime" }
+              ]
+            }
+          ])
+        )
+      )();
+      onMemberAboutDeleted = EventDefinition(
+        "wix.members.about.v2.member_about_deleted",
+        true,
+        (event) => renameKeysFromRESTResponseToSDKResponse(
+          transformPaths(event, [
+            {
+              transformFn: transformRESTFloatToSDKFloat,
+              paths: [
+                {
+                  path: "undefined.content.nodes.buttonData.styles.background.gradient.centerX"
+                },
+                {
+                  path: "undefined.content.nodes.buttonData.styles.background.gradient.centerY"
+                },
+                {
+                  path: "undefined.content.nodes.buttonData.styles.background.gradient.stops.position"
+                },
+                {
+                  path: "undefined.content.nodes.buttonData.styles.backgroundHover.gradient.centerX"
+                },
+                {
+                  path: "undefined.content.nodes.buttonData.styles.backgroundHover.gradient.centerY"
+                },
+                {
+                  path: "undefined.content.nodes.buttonData.styles.backgroundHover.gradient.stops.position"
+                },
+                {
+                  path: "undefined.content.nodes.galleryData.items.image.media.duration"
+                },
+                {
+                  path: "undefined.content.nodes.galleryData.items.video.media.duration"
+                },
+                {
+                  path: "undefined.content.nodes.galleryData.items.video.thumbnail.duration"
+                },
+                { path: "undefined.content.nodes.galleryData.options.item.ratio" },
+                { path: "undefined.content.nodes.imageData.image.duration" },
+                { path: "undefined.content.nodes.mapData.mapSettings.lat" },
+                { path: "undefined.content.nodes.mapData.mapSettings.lng" },
+                { path: "undefined.content.nodes.pollData.poll.image.duration" },
+                {
+                  path: "undefined.content.nodes.pollData.poll.options.image.duration"
+                },
+                {
+                  path: "undefined.content.nodes.pollData.design.poll.background.image.duration"
+                },
+                { path: "undefined.content.nodes.appEmbedData.image.duration" },
+                { path: "undefined.content.nodes.videoData.video.duration" },
+                { path: "undefined.content.nodes.videoData.thumbnail.duration" },
+                { path: "undefined.content.nodes.audioData.audio.duration" },
+                { path: "undefined.content.nodes.audioData.coverImage.duration" },
+                {
+                  path: "undefined.content.nodes.layoutData.backgroundImage.media.duration"
+                },
+                {
+                  path: "undefined.content.nodes.layoutData.backdropImage.media.duration"
+                },
+                {
+                  path: "undefined.content.nodes.layoutData.background.gradient.centerX"
+                },
+                {
+                  path: "undefined.content.nodes.layoutData.background.gradient.centerY"
+                },
+                {
+                  path: "undefined.content.nodes.layoutData.background.gradient.stops.position"
+                },
+                {
+                  path: "undefined.content.nodes.layoutData.backdrop.gradient.centerX"
+                },
+                {
+                  path: "undefined.content.nodes.layoutData.backdrop.gradient.centerY"
+                },
+                {
+                  path: "undefined.content.nodes.layoutData.backdrop.gradient.stops.position"
+                },
+                { path: "undefined.content.nodes.shapeData.shape.duration" },
+                {
+                  path: "undefined.content.nodes.cardData.background.gradient.centerX"
+                },
+                {
+                  path: "undefined.content.nodes.cardData.background.gradient.centerY"
+                },
+                {
+                  path: "undefined.content.nodes.cardData.background.gradient.stops.position"
+                },
+                {
+                  path: "undefined.content.nodes.cardData.backgroundImage.media.duration"
+                },
+                { path: "undefined.content.nodes.tocData.fontSize" },
+                { path: "undefined.content.nodes.tocData.itemSpacing" },
+                {
+                  path: "undefined.content.nodes.smartBlockCellData.shape.duration"
+                }
+              ]
+            },
+            {
+              transformFn: transformRESTTimestampToSDKTimestamp,
+              paths: [
+                { path: "undefined.content.metadata.createdTimestamp" },
+                { path: "undefined.content.metadata.updatedTimestamp" },
+                { path: "metadata.eventTime" }
+              ]
+            }
+          ])
+        )
+      )();
+      onMemberAboutUpdated = EventDefinition(
+        "wix.members.about.v2.member_about_updated",
+        true,
+        (event) => renameKeysFromRESTResponseToSDKResponse(
+          transformPaths(event, [
+            {
+              transformFn: transformRESTFloatToSDKFloat,
+              paths: [
+                {
+                  path: "entity.content.nodes.buttonData.styles.background.gradient.centerX"
+                },
+                {
+                  path: "entity.content.nodes.buttonData.styles.background.gradient.centerY"
+                },
+                {
+                  path: "entity.content.nodes.buttonData.styles.background.gradient.stops.position"
+                },
+                {
+                  path: "entity.content.nodes.buttonData.styles.backgroundHover.gradient.centerX"
+                },
+                {
+                  path: "entity.content.nodes.buttonData.styles.backgroundHover.gradient.centerY"
+                },
+                {
+                  path: "entity.content.nodes.buttonData.styles.backgroundHover.gradient.stops.position"
+                },
+                {
+                  path: "entity.content.nodes.galleryData.items.image.media.duration"
+                },
+                {
+                  path: "entity.content.nodes.galleryData.items.video.media.duration"
+                },
+                {
+                  path: "entity.content.nodes.galleryData.items.video.thumbnail.duration"
+                },
+                { path: "entity.content.nodes.galleryData.options.item.ratio" },
+                { path: "entity.content.nodes.imageData.image.duration" },
+                { path: "entity.content.nodes.mapData.mapSettings.lat" },
+                { path: "entity.content.nodes.mapData.mapSettings.lng" },
+                { path: "entity.content.nodes.pollData.poll.image.duration" },
+                {
+                  path: "entity.content.nodes.pollData.poll.options.image.duration"
+                },
+                {
+                  path: "entity.content.nodes.pollData.design.poll.background.image.duration"
+                },
+                { path: "entity.content.nodes.appEmbedData.image.duration" },
+                { path: "entity.content.nodes.videoData.video.duration" },
+                { path: "entity.content.nodes.videoData.thumbnail.duration" },
+                { path: "entity.content.nodes.audioData.audio.duration" },
+                { path: "entity.content.nodes.audioData.coverImage.duration" },
+                {
+                  path: "entity.content.nodes.layoutData.backgroundImage.media.duration"
+                },
+                {
+                  path: "entity.content.nodes.layoutData.backdropImage.media.duration"
+                },
+                {
+                  path: "entity.content.nodes.layoutData.background.gradient.centerX"
+                },
+                {
+                  path: "entity.content.nodes.layoutData.background.gradient.centerY"
+                },
+                {
+                  path: "entity.content.nodes.layoutData.background.gradient.stops.position"
+                },
+                {
+                  path: "entity.content.nodes.layoutData.backdrop.gradient.centerX"
+                },
+                {
+                  path: "entity.content.nodes.layoutData.backdrop.gradient.centerY"
+                },
+                {
+                  path: "entity.content.nodes.layoutData.backdrop.gradient.stops.position"
+                },
+                { path: "entity.content.nodes.shapeData.shape.duration" },
+                {
+                  path: "entity.content.nodes.cardData.background.gradient.centerX"
+                },
+                {
+                  path: "entity.content.nodes.cardData.background.gradient.centerY"
+                },
+                {
+                  path: "entity.content.nodes.cardData.background.gradient.stops.position"
+                },
+                {
+                  path: "entity.content.nodes.cardData.backgroundImage.media.duration"
+                },
+                { path: "entity.content.nodes.tocData.fontSize" },
+                { path: "entity.content.nodes.tocData.itemSpacing" },
+                { path: "entity.content.nodes.smartBlockCellData.shape.duration" }
+              ]
+            },
+            {
+              transformFn: transformRESTTimestampToSDKTimestamp,
+              paths: [
+                { path: "entity.content.metadata.createdTimestamp" },
+                { path: "entity.content.metadata.updatedTimestamp" },
+                { path: "metadata.eventTime" }
+              ]
+            }
+          ])
+        )
+      )();
+      onMemberAboutCreated2 = createEventModule(
+        onMemberAboutCreated
+      );
+      onMemberAboutDeleted2 = createEventModule(
+        onMemberAboutDeleted
+      );
+      onMemberAboutUpdated2 = createEventModule(
+        onMemberAboutUpdated
+      );
+    }
+  });
+
+  // node_modules/@wix/auto_sdk_members_user-member/build/es/index.mjs
+  var utils4;
+  var init_es13 = __esm({
+    "node_modules/@wix/auto_sdk_members_user-member/build/es/index.mjs"() {
+      init_query_builder_utils();
+      utils4 = {
+        query: {
+          ...createQueryUtils()
+        }
+      };
+    }
+  });
+
+  // node_modules/@wix/auto_sdk_members_custom-fields/build/es/index.mjs
+  var init_es14 = __esm({
+    "node_modules/@wix/auto_sdk_members_custom-fields/build/es/index.mjs"() {
+    }
+  });
+
+  // node_modules/@wix/auto_sdk_members_custom-field-applications/build/es/index.mjs
+  var init_es15 = __esm({
+    "node_modules/@wix/auto_sdk_members_custom-field-applications/build/es/index.mjs"() {
+    }
+  });
+
+  // node_modules/@wix/auto_sdk_members_custom-field-suggestions/build/es/index.mjs
+  var utils5;
+  var init_es16 = __esm({
+    "node_modules/@wix/auto_sdk_members_custom-field-suggestions/build/es/index.mjs"() {
+      init_query_builder_utils();
+      utils5 = {
+        query: {
+          ...createQueryUtils()
+        }
+      };
+    }
+  });
+
+  // node_modules/@wix/auto_sdk_members_default-privacy/build/es/index.mjs
+  var init_es17 = __esm({
+    "node_modules/@wix/auto_sdk_members_default-privacy/build/es/index.mjs"() {
+    }
+  });
+
+  // node_modules/@wix/auto_sdk_members_members/build/es/index.mjs
+  var es_exports6 = {};
+  __export(es_exports6, {
+    ActivityStatusStatus: () => ActivityStatusStatus,
+    DeleteStatus: () => DeleteStatus,
+    Namespace: () => Namespace,
+    PrivacyStatusStatus: () => PrivacyStatusStatus,
+    Set: () => Set,
+    SiteCreatedContext: () => SiteCreatedContext,
+    SortOrder: () => SortOrder,
+    State: () => State,
+    Status: () => Status,
+    WebhookIdentityType: () => WebhookIdentityType,
+    approveMember: () => approveMember4,
+    blockMember: () => blockMember4,
+    bulkApproveMembers: () => bulkApproveMembers4,
+    bulkBlockMembers: () => bulkBlockMembers4,
+    bulkDeleteMembers: () => bulkDeleteMembers4,
+    bulkDeleteMembersByFilter: () => bulkDeleteMembersByFilter4,
+    createMember: () => createMember4,
+    deleteMember: () => deleteMember4,
+    deleteMemberAddresses: () => deleteMemberAddresses4,
+    deleteMemberEmails: () => deleteMemberEmails4,
+    deleteMemberPhones: () => deleteMemberPhones4,
+    deleteMyMember: () => deleteMyMember4,
+    disconnectMember: () => disconnectMember4,
+    getCurrentMember: () => getCurrentMember3,
+    getMember: () => getMember4,
+    joinCommunity: () => joinCommunity4,
+    leaveCommunity: () => leaveCommunity4,
+    listMembers: () => listMembers4,
+    muteMember: () => muteMember4,
+    onMemberCreated: () => onMemberCreated2,
+    onMemberDeleted: () => onMemberDeleted2,
+    onMemberUpdated: () => onMemberUpdated2,
+    queryMembers: () => queryMembers4,
+    unmuteMember: () => unmuteMember4,
+    updateCurrentMemberSlug: () => updateCurrentMemberSlug3,
+    updateMember: () => updateMember4,
+    updateMemberSlug: () => updateMemberSlug4,
+    utils: () => utils6
+  });
+  function resolveComWixpressMembersApiMembersUrl(opts) {
+    const domainToMappings = {
+      "www.wixapis.com": [
+        {
+          srcPath: "/members/v1/members",
+          destPath: "/v1/members"
+        }
+      ],
+      "api._api_base_domain_": [
+        {
+          srcPath: "/members-ng-api",
+          destPath: ""
+        }
+      ],
+      "www._base_domain_": [
+        {
+          srcPath: "/_api/members/v1/members",
+          destPath: "/v1/members"
+        }
+      ],
+      "manage._base_domain_": [
+        {
+          srcPath: "/_api/members/v1/members",
+          destPath: "/v1/members"
+        }
+      ],
+      "editor._base_domain_": [
+        {
+          srcPath: "/_api/members/v1/members",
+          destPath: "/v1/members"
+        }
+      ],
+      "blocks._base_domain_": [
+        {
+          srcPath: "/_api/members/v1/members",
+          destPath: "/v1/members"
+        }
+      ],
+      "create.editorx": [
+        {
+          srcPath: "/_api/members/v1/members",
+          destPath: "/v1/members"
+        }
+      ],
+      "editor.wixapps.net": [
+        {
+          srcPath: "/_api/members/v1/members",
+          destPath: "/v1/members"
+        }
+      ],
+      "*.dev.wix-code.com": [
+        {
+          srcPath: "/_api/members/v1/members",
+          destPath: "/v1/members"
+        }
+      ],
+      "bo._base_domain_": [
+        {
+          srcPath: "/_api/members/v1/members",
+          destPath: "/v1/members"
+        }
+      ],
+      "wixbo.ai": [
+        {
+          srcPath: "/_api/members/v1/members",
+          destPath: "/v1/members"
+        }
+      ],
+      "wix-bo.com": [
+        {
+          srcPath: "/_api/members/v1/members",
+          destPath: "/v1/members"
+        }
+      ],
+      _: [
+        {
+          srcPath: "/_api/members/v1/members",
+          destPath: "/v1/members"
+        }
+      ],
+      "members.wixapps.net": [
+        {
+          srcPath: "/_api/members/v1/members",
+          destPath: "/v1/members"
+        }
+      ]
+    };
+    return resolveUrl(Object.assign(opts, { domainToMappings }));
+  }
+  function updateMySlug(payload) {
+    function __updateMySlug({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "POST",
+        methodFqn: "com.wixpress.members.api.Members.UpdateMySlug",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/my/slug",
+          data: payload,
+          host
+        }),
+        data: payload,
+        transformResponse: (payload2) => transformPaths(payload2, [
+          {
+            transformFn: transformRESTTimestampToSDKTimestamp,
+            paths: [
+              { path: "member.createdDate" },
+              { path: "member.updatedDate" },
+              { path: "member.lastLoginDate" }
+            ]
+          }
+        ])
+      };
+      return metadata;
+    }
+    return __updateMySlug;
+  }
+  function updateMemberSlug(payload) {
+    function __updateMemberSlug({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "POST",
+        methodFqn: "com.wixpress.members.api.Members.UpdateMemberSlug",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/{id}/slug",
+          data: payload,
+          host
+        }),
+        data: payload,
+        transformResponse: (payload2) => transformPaths(payload2, [
+          {
+            transformFn: transformRESTTimestampToSDKTimestamp,
+            paths: [
+              { path: "member.createdDate" },
+              { path: "member.updatedDate" },
+              { path: "member.lastLoginDate" }
+            ]
+          }
+        ])
+      };
+      return metadata;
+    }
+    return __updateMemberSlug;
+  }
+  function joinCommunity(payload) {
+    function __joinCommunity({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "POST",
+        methodFqn: "com.wixpress.members.api.Members.JoinCommunity",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/join-community",
+          data: payload,
+          host
+        }),
+        data: payload,
+        transformResponse: (payload2) => transformPaths(payload2, [
+          {
+            transformFn: transformRESTTimestampToSDKTimestamp,
+            paths: [
+              { path: "member.createdDate" },
+              { path: "member.updatedDate" },
+              { path: "member.lastLoginDate" }
+            ]
+          }
+        ])
+      };
+      return metadata;
+    }
+    return __joinCommunity;
+  }
+  function leaveCommunity(payload) {
+    function __leaveCommunity({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "POST",
+        methodFqn: "com.wixpress.members.api.Members.LeaveCommunity",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/leave-community",
+          data: payload,
+          host
+        }),
+        data: payload,
+        transformResponse: (payload2) => transformPaths(payload2, [
+          {
+            transformFn: transformRESTTimestampToSDKTimestamp,
+            paths: [
+              { path: "member.createdDate" },
+              { path: "member.updatedDate" },
+              { path: "member.lastLoginDate" }
+            ]
+          }
+        ])
+      };
+      return metadata;
+    }
+    return __leaveCommunity;
+  }
+  function getMyMember(payload) {
+    function __getMyMember({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "GET",
+        methodFqn: "com.wixpress.members.api.Members.GetMyMember",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/my",
+          data: payload,
+          host
+        }),
+        params: toURLSearchParams(payload),
+        transformResponse: (payload2) => transformPaths(payload2, [
+          {
+            transformFn: transformRESTTimestampToSDKTimestamp,
+            paths: [
+              { path: "member.createdDate" },
+              { path: "member.updatedDate" },
+              { path: "member.lastLoginDate" }
+            ]
+          }
+        ])
+      };
+      return metadata;
+    }
+    return __getMyMember;
+  }
+  function getMember(payload) {
+    function __getMember({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "GET",
+        methodFqn: "com.wixpress.members.api.Members.GetMember",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/{id}",
+          data: payload,
+          host
+        }),
+        params: toURLSearchParams(payload),
+        transformResponse: (payload2) => transformPaths(payload2, [
+          {
+            transformFn: transformRESTTimestampToSDKTimestamp,
+            paths: [
+              { path: "member.createdDate" },
+              { path: "member.updatedDate" },
+              { path: "member.lastLoginDate" }
+            ]
+          }
+        ])
+      };
+      return metadata;
+    }
+    return __getMember;
+  }
+  function listMembers(payload) {
+    function __listMembers({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "GET",
+        methodFqn: "com.wixpress.members.api.Members.ListMembers",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members",
+          data: payload,
+          host
+        }),
+        params: toURLSearchParams(payload, true),
+        transformResponse: (payload2) => transformPaths(payload2, [
+          {
+            transformFn: transformRESTTimestampToSDKTimestamp,
+            paths: [
+              { path: "members.createdDate" },
+              { path: "members.updatedDate" },
+              { path: "members.lastLoginDate" }
+            ]
+          }
+        ])
+      };
+      return metadata;
+    }
+    return __listMembers;
+  }
+  function queryMembers(payload) {
+    function __queryMembers({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "POST",
+        methodFqn: "com.wixpress.members.api.Members.QueryMembers",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/query",
+          data: payload,
+          host
+        }),
+        data: payload,
+        transformResponse: (payload2) => transformPaths(payload2, [
+          {
+            transformFn: transformRESTTimestampToSDKTimestamp,
+            paths: [
+              { path: "members.createdDate" },
+              { path: "members.updatedDate" },
+              { path: "members.lastLoginDate" }
+            ]
+          }
+        ])
+      };
+      return metadata;
+    }
+    return __queryMembers;
+  }
+  function muteMember(payload) {
+    function __muteMember({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "POST",
+        methodFqn: "com.wixpress.members.api.Members.MuteMember",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/{id}/mute",
+          data: payload,
+          host
+        }),
+        data: payload,
+        transformResponse: (payload2) => transformPaths(payload2, [
+          {
+            transformFn: transformRESTTimestampToSDKTimestamp,
+            paths: [
+              { path: "member.createdDate" },
+              { path: "member.updatedDate" },
+              { path: "member.lastLoginDate" }
+            ]
+          }
+        ])
+      };
+      return metadata;
+    }
+    return __muteMember;
+  }
+  function unmuteMember(payload) {
+    function __unmuteMember({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "POST",
+        methodFqn: "com.wixpress.members.api.Members.UnmuteMember",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/{id}/unmute",
+          data: payload,
+          host
+        }),
+        data: payload,
+        transformResponse: (payload2) => transformPaths(payload2, [
+          {
+            transformFn: transformRESTTimestampToSDKTimestamp,
+            paths: [
+              { path: "member.createdDate" },
+              { path: "member.updatedDate" },
+              { path: "member.lastLoginDate" }
+            ]
+          }
+        ])
+      };
+      return metadata;
+    }
+    return __unmuteMember;
+  }
+  function approveMember(payload) {
+    function __approveMember({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "POST",
+        methodFqn: "com.wixpress.members.api.Members.ApproveMember",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/{id}/approve",
+          data: payload,
+          host
+        }),
+        data: payload,
+        transformResponse: (payload2) => transformPaths(payload2, [
+          {
+            transformFn: transformRESTTimestampToSDKTimestamp,
+            paths: [
+              { path: "member.createdDate" },
+              { path: "member.updatedDate" },
+              { path: "member.lastLoginDate" }
+            ]
+          }
+        ])
+      };
+      return metadata;
+    }
+    return __approveMember;
+  }
+  function blockMember(payload) {
+    function __blockMember({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "POST",
+        methodFqn: "com.wixpress.members.api.Members.BlockMember",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/{id}/block",
+          data: payload,
+          host
+        }),
+        data: payload,
+        transformResponse: (payload2) => transformPaths(payload2, [
+          {
+            transformFn: transformRESTTimestampToSDKTimestamp,
+            paths: [
+              { path: "member.createdDate" },
+              { path: "member.updatedDate" },
+              { path: "member.lastLoginDate" }
+            ]
+          }
+        ])
+      };
+      return metadata;
+    }
+    return __blockMember;
+  }
+  function disconnectMember(payload) {
+    function __disconnectMember({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "POST",
+        methodFqn: "com.wixpress.members.api.Members.DisconnectMember",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/{id}/disconnect",
+          data: payload,
+          host
+        }),
+        data: payload,
+        transformResponse: (payload2) => transformPaths(payload2, [
+          {
+            transformFn: transformRESTTimestampToSDKTimestamp,
+            paths: [
+              { path: "member.createdDate" },
+              { path: "member.updatedDate" },
+              { path: "member.lastLoginDate" }
+            ]
+          }
+        ])
+      };
+      return metadata;
+    }
+    return __disconnectMember;
+  }
+  function deleteMember(payload) {
+    function __deleteMember({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "DELETE",
+        methodFqn: "com.wixpress.members.api.Members.DeleteMember",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/{id}",
+          data: payload,
+          host
+        }),
+        params: toURLSearchParams(payload)
+      };
+      return metadata;
+    }
+    return __deleteMember;
+  }
+  function deleteMyMember(payload) {
+    function __deleteMyMember({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "DELETE",
+        methodFqn: "com.wixpress.members.api.Members.DeleteMyMember",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/my",
+          data: payload,
+          host
+        }),
+        params: toURLSearchParams(payload)
+      };
+      return metadata;
+    }
+    return __deleteMyMember;
+  }
+  function bulkDeleteMembers(payload) {
+    function __bulkDeleteMembers({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "POST",
+        methodFqn: "com.wixpress.members.api.Members.BulkDeleteMembers",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/bulk/delete",
+          data: payload,
+          host
+        }),
+        data: payload
+      };
+      return metadata;
+    }
+    return __bulkDeleteMembers;
+  }
+  function bulkDeleteMembersByFilter(payload) {
+    function __bulkDeleteMembersByFilter({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "POST",
+        methodFqn: "com.wixpress.members.api.Members.BulkDeleteMembersByFilter",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/bulk/delete-by-filter",
+          data: payload,
+          host
+        }),
+        data: payload
+      };
+      return metadata;
+    }
+    return __bulkDeleteMembersByFilter;
+  }
+  function bulkApproveMembers(payload) {
+    function __bulkApproveMembers({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "POST",
+        methodFqn: "com.wixpress.members.api.Members.BulkApproveMembers",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/bulk/approve-by-filter",
+          data: payload,
+          host
+        }),
+        data: payload
+      };
+      return metadata;
+    }
+    return __bulkApproveMembers;
+  }
+  function bulkBlockMembers(payload) {
+    function __bulkBlockMembers({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "POST",
+        methodFqn: "com.wixpress.members.api.Members.BulkBlockMembers",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/bulk/block-by-filter",
+          data: payload,
+          host
+        }),
+        data: payload
+      };
+      return metadata;
+    }
+    return __bulkBlockMembers;
+  }
+  function createMember(payload) {
+    function __createMember({ host }) {
+      const serializedData = transformPaths(payload, [
+        {
+          transformFn: transformSDKTimestampToRESTTimestamp,
+          paths: [
+            { path: "member.createdDate" },
+            { path: "member.updatedDate" },
+            { path: "member.lastLoginDate" }
+          ]
+        }
+      ]);
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "POST",
+        methodFqn: "com.wixpress.members.api.Members.CreateMember",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members",
+          data: serializedData,
+          host
+        }),
+        data: serializedData,
+        transformResponse: (payload2) => transformPaths(payload2, [
+          {
+            transformFn: transformRESTTimestampToSDKTimestamp,
+            paths: [
+              { path: "member.createdDate" },
+              { path: "member.updatedDate" },
+              { path: "member.lastLoginDate" }
+            ]
+          }
+        ])
+      };
+      return metadata;
+    }
+    return __createMember;
+  }
+  function updateMember(payload) {
+    function __updateMember({ host }) {
+      const serializedData = transformPaths(payload, [
+        {
+          transformFn: transformSDKTimestampToRESTTimestamp,
+          paths: [
+            { path: "member.createdDate" },
+            { path: "member.updatedDate" },
+            { path: "member.lastLoginDate" }
+          ]
+        }
+      ]);
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "PATCH",
+        methodFqn: "com.wixpress.members.api.Members.UpdateMember",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/{member.id}",
+          data: serializedData,
+          host
+        }),
+        data: serializedData,
+        transformResponse: (payload2) => transformPaths(payload2, [
+          {
+            transformFn: transformRESTTimestampToSDKTimestamp,
+            paths: [
+              { path: "member.createdDate" },
+              { path: "member.updatedDate" },
+              { path: "member.lastLoginDate" }
+            ]
+          }
+        ])
+      };
+      return metadata;
+    }
+    return __updateMember;
+  }
+  function deleteMemberPhones(payload) {
+    function __deleteMemberPhones({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "DELETE",
+        methodFqn: "com.wixpress.members.api.Members.DeleteMemberPhones",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/{id}/phones",
+          data: payload,
+          host
+        }),
+        params: toURLSearchParams(payload),
+        transformResponse: (payload2) => transformPaths(payload2, [
+          {
+            transformFn: transformRESTTimestampToSDKTimestamp,
+            paths: [
+              { path: "member.createdDate" },
+              { path: "member.updatedDate" },
+              { path: "member.lastLoginDate" }
+            ]
+          }
+        ])
+      };
+      return metadata;
+    }
+    return __deleteMemberPhones;
+  }
+  function deleteMemberEmails(payload) {
+    function __deleteMemberEmails({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "DELETE",
+        methodFqn: "com.wixpress.members.api.Members.DeleteMemberEmails",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/{id}/emails",
+          data: payload,
+          host
+        }),
+        params: toURLSearchParams(payload),
+        transformResponse: (payload2) => transformPaths(payload2, [
+          {
+            transformFn: transformRESTTimestampToSDKTimestamp,
+            paths: [
+              { path: "member.createdDate" },
+              { path: "member.updatedDate" },
+              { path: "member.lastLoginDate" }
+            ]
+          }
+        ])
+      };
+      return metadata;
+    }
+    return __deleteMemberEmails;
+  }
+  function deleteMemberAddresses(payload) {
+    function __deleteMemberAddresses({ host }) {
+      const metadata = {
+        entityFqdn: "wix.members.v1.member",
+        method: "DELETE",
+        methodFqn: "com.wixpress.members.api.Members.DeleteMemberAddresses",
+        packageName: PACKAGE_NAME,
+        migrationOptions: {
+          optInTransformResponse: true
+        },
+        url: resolveComWixpressMembersApiMembersUrl({
+          protoPath: "/v1/members/{id}/addresses",
+          data: payload,
+          host
+        }),
+        params: toURLSearchParams(payload),
+        transformResponse: (payload2) => transformPaths(payload2, [
+          {
+            transformFn: transformRESTTimestampToSDKTimestamp,
+            paths: [
+              { path: "member.createdDate" },
+              { path: "member.updatedDate" },
+              { path: "member.lastLoginDate" }
+            ]
+          }
+        ])
+      };
+      return metadata;
+    }
+    return __deleteMemberAddresses;
+  }
+  async function updateCurrentMemberSlug(slug) {
+    const { httpClient, sideEffects } = arguments[1];
+    const payload = renameKeysFromSDKRequestToRESTRequest({ slug });
+    const reqOpts = updateMySlug(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data);
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: { slug: "$[0]" },
+          singleArgumentUnchanged: false
+        },
+        ["slug"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function updateMemberSlug2(_id, slug) {
+    const { httpClient, sideEffects } = arguments[2];
+    const payload = renameKeysFromSDKRequestToRESTRequest({
+      id: _id,
+      slug
+    });
+    const reqOpts = updateMemberSlug(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data);
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: { id: "$[0]", slug: "$[1]" },
+          singleArgumentUnchanged: false
+        },
+        ["_id", "slug"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function joinCommunity2() {
+    const { httpClient, sideEffects } = arguments[0];
+    const payload = renameKeysFromSDKRequestToRESTRequest({});
+    const reqOpts = joinCommunity(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data);
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: {},
+          singleArgumentUnchanged: false
+        },
+        []
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function leaveCommunity2() {
+    const { httpClient, sideEffects } = arguments[0];
+    const payload = renameKeysFromSDKRequestToRESTRequest({});
+    const reqOpts = leaveCommunity(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data);
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: {},
+          singleArgumentUnchanged: false
+        },
+        []
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function getCurrentMember(options) {
+    const { httpClient, sideEffects } = arguments[1];
+    const payload = renameKeysFromSDKRequestToRESTRequest({
+      fieldsets: options?.fieldsets
+    });
+    const reqOpts = getMyMember(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data);
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: { fieldsets: "$[0].fieldsets" },
+          singleArgumentUnchanged: false
+        },
+        ["options"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function getMember2(_id, options) {
+    const { httpClient, sideEffects } = arguments[2];
+    const payload = renameKeysFromSDKRequestToRESTRequest({
+      id: _id,
+      fieldsets: options?.fieldsets
+    });
+    const reqOpts = getMember(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data)?.member;
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: { id: "$[0]", fieldsets: "$[1].fieldsets" },
+          singleArgumentUnchanged: false
+        },
+        ["_id", "options"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function listMembers2(options) {
+    const { httpClient, sideEffects } = arguments[1];
+    const payload = renameKeysFromSDKRequestToRESTRequest({
+      paging: options?.paging,
+      fieldsets: options?.fieldsets,
+      sorting: options?.sorting
+    });
+    const reqOpts = listMembers(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data);
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: {
+            paging: "$[0].paging",
+            fieldsets: "$[0].fieldsets",
+            sorting: "$[0].sorting"
+          },
+          singleArgumentUnchanged: false
+        },
+        ["options"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  function queryMembers2(options) {
+    const { httpClient, sideEffects } = arguments[1];
+    return queryBuilder({
+      func: async (payload) => {
+        const reqOpts = queryMembers({
+          ...payload,
+          ...options ?? {}
+        });
+        sideEffects?.onSiteCall?.();
+        try {
+          const result = await httpClient.request(reqOpts);
+          sideEffects?.onSuccess?.(result);
+          return result;
+        } catch (err) {
+          sideEffects?.onError?.(err);
+          throw err;
+        }
+      },
+      requestTransformer: (query) => {
+        const args = [query, options];
+        return renameKeysFromSDKRequestToRESTRequest({
+          ...args?.[1],
+          query: args?.[0]
+        });
+      },
+      responseTransformer: ({ data }) => {
+        const transformedData = renameKeysFromRESTResponseToSDKResponse(
+          transformPaths(data, [])
+        );
+        return {
+          items: transformedData?.members,
+          pagingMetadata: transformedData?.metadata
+        };
+      },
+      errorTransformer: (err) => {
+        const transformedError = transformError(err, {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: { query: "$[0]" },
+          singleArgumentUnchanged: false
+        });
+        throw transformedError;
+      },
+      pagingMethod: "OFFSET",
+      transformationPaths: {}
+    });
+  }
+  async function typedQueryMembers(query, options) {
+    const { httpClient, sideEffects } = arguments[2];
+    const payload = renameKeysFromSDKRequestToRESTRequest({
+      query,
+      ...options
+    });
+    const reqOpts = queryMembers(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data);
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: { query: "$[0]" },
+          singleArgumentUnchanged: false
+        },
+        ["query", "options"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function muteMember2(_id) {
+    const { httpClient, sideEffects } = arguments[1];
+    const payload = renameKeysFromSDKRequestToRESTRequest({ id: _id });
+    const reqOpts = muteMember(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data);
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: { id: "$[0]" },
+          singleArgumentUnchanged: false
+        },
+        ["_id"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function unmuteMember2(_id) {
+    const { httpClient, sideEffects } = arguments[1];
+    const payload = renameKeysFromSDKRequestToRESTRequest({ id: _id });
+    const reqOpts = unmuteMember(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data);
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: { id: "$[0]" },
+          singleArgumentUnchanged: false
+        },
+        ["_id"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function approveMember2(_id) {
+    const { httpClient, sideEffects } = arguments[1];
+    const payload = renameKeysFromSDKRequestToRESTRequest({ id: _id });
+    const reqOpts = approveMember(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data);
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: { id: "$[0]" },
+          singleArgumentUnchanged: false
+        },
+        ["_id"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function blockMember2(_id) {
+    const { httpClient, sideEffects } = arguments[1];
+    const payload = renameKeysFromSDKRequestToRESTRequest({ id: _id });
+    const reqOpts = blockMember(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data);
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: { id: "$[0]" },
+          singleArgumentUnchanged: false
+        },
+        ["_id"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function disconnectMember2(_id) {
+    const { httpClient, sideEffects } = arguments[1];
+    const payload = renameKeysFromSDKRequestToRESTRequest({ id: _id });
+    const reqOpts = disconnectMember(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data);
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: { id: "$[0]" },
+          singleArgumentUnchanged: false
+        },
+        ["_id"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function deleteMember2(_id) {
+    const { httpClient, sideEffects } = arguments[1];
+    const payload = renameKeysFromSDKRequestToRESTRequest({ id: _id });
+    const reqOpts = deleteMember(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data);
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: { id: "$[0]" },
+          singleArgumentUnchanged: false
+        },
+        ["_id"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function deleteMyMember2(options) {
+    const { httpClient, sideEffects } = arguments[1];
+    const payload = renameKeysFromSDKRequestToRESTRequest({
+      contentAssigneeId: options?.contentAssigneeId
+    });
+    const reqOpts = deleteMyMember(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data);
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: {
+            contentAssigneeId: "$[0].contentAssigneeId"
+          },
+          singleArgumentUnchanged: false
+        },
+        ["options"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function bulkDeleteMembers2(memberIds) {
+    const { httpClient, sideEffects } = arguments[1];
+    const payload = renameKeysFromSDKRequestToRESTRequest({
+      memberIds
+    });
+    const reqOpts = bulkDeleteMembers(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data);
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: { memberIds: "$[0]" },
+          singleArgumentUnchanged: false
+        },
+        ["memberIds"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function bulkDeleteMembersByFilter2(filter, options) {
+    const { httpClient, sideEffects } = arguments[2];
+    const payload = renameKeysFromSDKRequestToRESTRequest({
+      filter,
+      contentAssigneeId: options?.contentAssigneeId,
+      search: options?.search
+    });
+    const reqOpts = bulkDeleteMembersByFilter(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data);
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: {
+            filter: "$[0]",
+            contentAssigneeId: "$[1].contentAssigneeId",
+            search: "$[1].search"
+          },
+          singleArgumentUnchanged: false
+        },
+        ["filter", "options"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function bulkApproveMembers2(filter) {
+    const { httpClient, sideEffects } = arguments[1];
+    const payload = renameKeysFromSDKRequestToRESTRequest({ filter });
+    const reqOpts = bulkApproveMembers(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data);
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: { filter: "$[0]" },
+          singleArgumentUnchanged: false
+        },
+        ["filter"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function bulkBlockMembers2(filter) {
+    const { httpClient, sideEffects } = arguments[1];
+    const payload = renameKeysFromSDKRequestToRESTRequest({ filter });
+    const reqOpts = bulkBlockMembers(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data);
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: { filter: "$[0]" },
+          singleArgumentUnchanged: false
+        },
+        ["filter"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function createMember2(options) {
+    const { httpClient, sideEffects } = arguments[1];
+    const payload = renameKeysFromSDKRequestToRESTRequest({
+      member: options?.member
+    });
+    const reqOpts = createMember(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data)?.member;
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: { member: "$[0].member" },
+          singleArgumentUnchanged: false
+        },
+        ["options"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function updateMember2(_id, member) {
+    const { httpClient, sideEffects } = arguments[2];
+    const payload = renameKeysFromSDKRequestToRESTRequest({
+      member: { ...member, id: _id }
+    });
+    const reqOpts = updateMember(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data)?.member;
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: { member: "$[1]" },
+          explicitPathsToArguments: { "member.id": "$[0]" },
+          singleArgumentUnchanged: false
+        },
+        ["_id", "member"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function deleteMemberPhones2(_id) {
+    const { httpClient, sideEffects } = arguments[1];
+    const payload = renameKeysFromSDKRequestToRESTRequest({ id: _id });
+    const reqOpts = deleteMemberPhones(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data);
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: { id: "$[0]" },
+          singleArgumentUnchanged: false
+        },
+        ["_id"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function deleteMemberEmails2(_id) {
+    const { httpClient, sideEffects } = arguments[1];
+    const payload = renameKeysFromSDKRequestToRESTRequest({ id: _id });
+    const reqOpts = deleteMemberEmails(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data);
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: { id: "$[0]" },
+          singleArgumentUnchanged: false
+        },
+        ["_id"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  async function deleteMemberAddresses2(_id) {
+    const { httpClient, sideEffects } = arguments[1];
+    const payload = renameKeysFromSDKRequestToRESTRequest({ id: _id });
+    const reqOpts = deleteMemberAddresses(payload);
+    sideEffects?.onSiteCall?.();
+    try {
+      const result = await httpClient.request(reqOpts);
+      sideEffects?.onSuccess?.(result);
+      return renameKeysFromRESTResponseToSDKResponse(result.data);
+    } catch (err) {
+      const transformedError = transformError(
+        err,
+        {
+          spreadPathsToArguments: {},
+          explicitPathsToArguments: { id: "$[0]" },
+          singleArgumentUnchanged: false
+        },
+        ["_id"]
+      );
+      sideEffects?.onError?.(err);
+      throw transformedError;
+    }
+  }
+  function updateCurrentMemberSlug2(httpClient) {
+    return (slug) => updateCurrentMemberSlug(
+      slug,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function updateMemberSlug3(httpClient) {
+    return (_id, slug) => updateMemberSlug2(
+      _id,
+      slug,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function joinCommunity3(httpClient) {
+    return () => joinCommunity2(
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function leaveCommunity3(httpClient) {
+    return () => leaveCommunity2(
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function getCurrentMember2(httpClient) {
+    return (options) => getCurrentMember(
+      options,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function getMember3(httpClient) {
+    return (_id, options) => getMember2(
+      _id,
+      options,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function listMembers3(httpClient) {
+    return (options) => listMembers2(
+      options,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function queryMembers3(httpClient) {
+    return (options) => queryMembers2(
+      options,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function typedQueryMembers2(httpClient) {
+    return (query, options) => typedQueryMembers(
+      query,
+      options,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function muteMember3(httpClient) {
+    return (_id) => muteMember2(
+      _id,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function unmuteMember3(httpClient) {
+    return (_id) => unmuteMember2(
+      _id,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function approveMember3(httpClient) {
+    return (_id) => approveMember2(
+      _id,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function blockMember3(httpClient) {
+    return (_id) => blockMember2(
+      _id,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function disconnectMember3(httpClient) {
+    return (_id) => disconnectMember2(
+      _id,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function deleteMember3(httpClient) {
+    return (_id) => deleteMember2(
+      _id,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function deleteMyMember3(httpClient) {
+    return (options) => deleteMyMember2(
+      options,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function bulkDeleteMembers3(httpClient) {
+    return (memberIds) => bulkDeleteMembers2(
+      memberIds,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function bulkDeleteMembersByFilter3(httpClient) {
+    return (filter, options) => bulkDeleteMembersByFilter2(
+      filter,
+      options,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function bulkApproveMembers3(httpClient) {
+    return (filter) => bulkApproveMembers2(
+      filter,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function bulkBlockMembers3(httpClient) {
+    return (filter) => bulkBlockMembers2(
+      filter,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function createMember3(httpClient) {
+    return (options) => createMember2(
+      options,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function updateMember3(httpClient) {
+    return (_id, member) => updateMember2(
+      _id,
+      member,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function deleteMemberPhones3(httpClient) {
+    return (_id) => deleteMemberPhones2(
+      _id,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function deleteMemberEmails3(httpClient) {
+    return (_id) => deleteMemberEmails2(
+      _id,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function deleteMemberAddresses3(httpClient) {
+    return (_id) => deleteMemberAddresses2(
+      _id,
+      // @ts-ignore
+      { httpClient }
+    );
+  }
+  function customQueryMembers(httpClient) {
+    const router = createQueryOverloadRouter({
+      builderQueryFunction: (options) => queryMembers3(httpClient)(options),
+      typedQueryFunction: (query, options) => typedQueryMembers2(httpClient)(query, options),
+      hasOptionsParameter: true
+    });
+    function overloadedQuery(queryOrOptions, options) {
+      return router(...arguments);
+    }
+    return overloadedQuery;
+  }
+  var PACKAGE_NAME, Status, PrivacyStatusStatus, ActivityStatusStatus, Set, SortOrder, State, SiteCreatedContext, Namespace, DeleteStatus, WebhookIdentityType, utils6, onMemberCreated, onMemberDeleted, onMemberUpdated, updateCurrentMemberSlug3, updateMemberSlug4, joinCommunity4, leaveCommunity4, getCurrentMember3, getMember4, listMembers4, muteMember4, unmuteMember4, approveMember4, blockMember4, disconnectMember4, deleteMember4, deleteMyMember4, bulkDeleteMembers4, bulkDeleteMembersByFilter4, bulkApproveMembers4, bulkBlockMembers4, createMember4, updateMember4, deleteMemberPhones4, deleteMemberEmails4, deleteMemberAddresses4, queryMembers4, onMemberCreated2, onMemberDeleted2, onMemberUpdated2;
+  var init_es18 = __esm({
+    "node_modules/@wix/auto_sdk_members_members/build/es/index.mjs"() {
+      init_rename_all_nested_keys();
+      init_timestamp();
+      init_transform_paths();
+      init_browser2();
+      init_transform_error();
+      init_query_builder();
+      init_rename_all_nested_keys();
+      init_rest_modules2();
+      init_timestamp();
+      init_timestamp();
+      init_transform_paths();
+      init_rest_modules2();
+      init_transform_paths();
+      init_query_builder_utils();
+      init_rest_modules2();
+      init_event_definition_modules();
+      init_query_method_router();
+      PACKAGE_NAME = "@wix/auto_sdk_members_members";
+      Status = /* @__PURE__ */ ((Status2) => {
+        Status2["UNKNOWN"] = "UNKNOWN";
+        Status2["PENDING"] = "PENDING";
+        Status2["APPROVED"] = "APPROVED";
+        Status2["BLOCKED"] = "BLOCKED";
+        Status2["OFFLINE"] = "OFFLINE";
+        return Status2;
+      })(Status || {});
+      PrivacyStatusStatus = /* @__PURE__ */ ((PrivacyStatusStatus2) => {
+        PrivacyStatusStatus2["UNKNOWN"] = "UNKNOWN";
+        PrivacyStatusStatus2["PRIVATE"] = "PRIVATE";
+        PrivacyStatusStatus2["PUBLIC"] = "PUBLIC";
+        return PrivacyStatusStatus2;
+      })(PrivacyStatusStatus || {});
+      ActivityStatusStatus = /* @__PURE__ */ ((ActivityStatusStatus2) => {
+        ActivityStatusStatus2["UNKNOWN"] = "UNKNOWN";
+        ActivityStatusStatus2["ACTIVE"] = "ACTIVE";
+        ActivityStatusStatus2["MUTED"] = "MUTED";
+        return ActivityStatusStatus2;
+      })(ActivityStatusStatus || {});
+      Set = /* @__PURE__ */ ((Set2) => {
+        Set2["PUBLIC"] = "PUBLIC";
+        Set2["EXTENDED"] = "EXTENDED";
+        Set2["FULL"] = "FULL";
+        return Set2;
+      })(Set || {});
+      SortOrder = /* @__PURE__ */ ((SortOrder2) => {
+        SortOrder2["ASC"] = "ASC";
+        SortOrder2["DESC"] = "DESC";
+        return SortOrder2;
+      })(SortOrder || {});
+      State = /* @__PURE__ */ ((State2) => {
+        State2["UNKNOWN"] = "UNKNOWN";
+        State2["ENABLED"] = "ENABLED";
+        State2["DISABLED"] = "DISABLED";
+        State2["PENDING"] = "PENDING";
+        State2["DEMO"] = "DEMO";
+        return State2;
+      })(State || {});
+      SiteCreatedContext = /* @__PURE__ */ ((SiteCreatedContext2) => {
+        SiteCreatedContext2["OTHER"] = "OTHER";
+        SiteCreatedContext2["FROM_TEMPLATE"] = "FROM_TEMPLATE";
+        SiteCreatedContext2["DUPLICATE_BY_SITE_TRANSFER"] = "DUPLICATE_BY_SITE_TRANSFER";
+        SiteCreatedContext2["DUPLICATE"] = "DUPLICATE";
+        SiteCreatedContext2["OLD_SITE_TRANSFER"] = "OLD_SITE_TRANSFER";
+        SiteCreatedContext2["FLASH"] = "FLASH";
+        return SiteCreatedContext2;
+      })(SiteCreatedContext || {});
+      Namespace = /* @__PURE__ */ ((Namespace2) => {
+        Namespace2["UNKNOWN_NAMESPACE"] = "UNKNOWN_NAMESPACE";
+        Namespace2["WIX"] = "WIX";
+        Namespace2["SHOUT_OUT"] = "SHOUT_OUT";
+        Namespace2["ALBUMS"] = "ALBUMS";
+        Namespace2["WIX_STORES_TEST_DRIVE"] = "WIX_STORES_TEST_DRIVE";
+        Namespace2["HOTELS"] = "HOTELS";
+        Namespace2["CLUBS"] = "CLUBS";
+        Namespace2["ONBOARDING_DRAFT"] = "ONBOARDING_DRAFT";
+        Namespace2["DEV_SITE"] = "DEV_SITE";
+        Namespace2["LOGOS"] = "LOGOS";
+        Namespace2["VIDEO_MAKER"] = "VIDEO_MAKER";
+        Namespace2["PARTNER_DASHBOARD"] = "PARTNER_DASHBOARD";
+        Namespace2["DEV_CENTER_COMPANY"] = "DEV_CENTER_COMPANY";
+        Namespace2["HTML_DRAFT"] = "HTML_DRAFT";
+        Namespace2["SITELESS_BUSINESS"] = "SITELESS_BUSINESS";
+        Namespace2["CREATOR_ECONOMY"] = "CREATOR_ECONOMY";
+        Namespace2["DASHBOARD_FIRST"] = "DASHBOARD_FIRST";
+        Namespace2["ANYWHERE"] = "ANYWHERE";
+        Namespace2["HEADLESS"] = "HEADLESS";
+        Namespace2["ACCOUNT_MASTER_CMS"] = "ACCOUNT_MASTER_CMS";
+        Namespace2["RISE"] = "RISE";
+        Namespace2["BRANDED_FIRST"] = "BRANDED_FIRST";
+        Namespace2["NOWNIA"] = "NOWNIA";
+        Namespace2["UGC_TEMPLATE"] = "UGC_TEMPLATE";
+        Namespace2["CODUX"] = "CODUX";
+        Namespace2["MEDIA_DESIGN_CREATOR"] = "MEDIA_DESIGN_CREATOR";
+        Namespace2["SHARED_BLOG_ENTERPRISE"] = "SHARED_BLOG_ENTERPRISE";
+        Namespace2["STANDALONE_FORMS"] = "STANDALONE_FORMS";
+        Namespace2["STANDALONE_EVENTS"] = "STANDALONE_EVENTS";
+        Namespace2["MIMIR"] = "MIMIR";
+        Namespace2["TWINS"] = "TWINS";
+        Namespace2["NANO"] = "NANO";
+        Namespace2["BASE44"] = "BASE44";
+        Namespace2["CHANNELS"] = "CHANNELS";
+        Namespace2["NAUTILUS"] = "NAUTILUS";
+        return Namespace2;
+      })(Namespace || {});
+      DeleteStatus = /* @__PURE__ */ ((DeleteStatus2) => {
+        DeleteStatus2["UNKNOWN"] = "UNKNOWN";
+        DeleteStatus2["TRASH"] = "TRASH";
+        DeleteStatus2["DELETED"] = "DELETED";
+        DeleteStatus2["PENDING_PURGE"] = "PENDING_PURGE";
+        DeleteStatus2["PURGED_EXTERNALLY"] = "PURGED_EXTERNALLY";
+        return DeleteStatus2;
+      })(DeleteStatus || {});
+      WebhookIdentityType = /* @__PURE__ */ ((WebhookIdentityType2) => {
+        WebhookIdentityType2["UNKNOWN"] = "UNKNOWN";
+        WebhookIdentityType2["ANONYMOUS_VISITOR"] = "ANONYMOUS_VISITOR";
+        WebhookIdentityType2["MEMBER"] = "MEMBER";
+        WebhookIdentityType2["WIX_USER"] = "WIX_USER";
+        WebhookIdentityType2["APP"] = "APP";
+        return WebhookIdentityType2;
+      })(WebhookIdentityType || {});
+      utils6 = {
+        query: {
+          ...createQueryUtils()
+        }
+      };
+      onMemberCreated = EventDefinition(
+        "wix.members.v1.member_created",
+        true,
+        (event) => renameKeysFromRESTResponseToSDKResponse(
+          transformPaths(event, [
+            {
+              transformFn: transformRESTTimestampToSDKTimestamp,
+              paths: [
+                { path: "entity.createdDate" },
+                { path: "entity.updatedDate" },
+                { path: "entity.lastLoginDate" },
+                { path: "metadata.eventTime" }
+              ]
+            }
+          ])
+        )
+      )();
+      onMemberDeleted = EventDefinition(
+        "wix.members.v1.member_deleted",
+        true,
+        (event) => renameKeysFromRESTResponseToSDKResponse(
+          transformPaths(event, [
+            {
+              transformFn: transformRESTTimestampToSDKTimestamp,
+              paths: [
+                { path: "undefined.createdDate" },
+                { path: "undefined.updatedDate" },
+                { path: "undefined.lastLoginDate" },
+                { path: "metadata.eventTime" }
+              ]
+            }
+          ])
+        )
+      )();
+      onMemberUpdated = EventDefinition(
+        "wix.members.v1.member_updated",
+        true,
+        (event) => renameKeysFromRESTResponseToSDKResponse(
+          transformPaths(event, [
+            {
+              transformFn: transformRESTTimestampToSDKTimestamp,
+              paths: [
+                { path: "entity.createdDate" },
+                { path: "entity.updatedDate" },
+                { path: "entity.lastLoginDate" },
+                { path: "metadata.eventTime" }
+              ]
+            }
+          ])
+        )
+      )();
+      updateCurrentMemberSlug3 = /* @__PURE__ */ createRESTModule(updateCurrentMemberSlug2);
+      updateMemberSlug4 = /* @__PURE__ */ createRESTModule(updateMemberSlug3);
+      joinCommunity4 = /* @__PURE__ */ createRESTModule(joinCommunity3);
+      leaveCommunity4 = /* @__PURE__ */ createRESTModule(leaveCommunity3);
+      getCurrentMember3 = /* @__PURE__ */ createRESTModule(getCurrentMember2);
+      getMember4 = /* @__PURE__ */ createRESTModule(getMember3);
+      listMembers4 = /* @__PURE__ */ createRESTModule(listMembers3);
+      muteMember4 = /* @__PURE__ */ createRESTModule(muteMember3);
+      unmuteMember4 = /* @__PURE__ */ createRESTModule(unmuteMember3);
+      approveMember4 = /* @__PURE__ */ createRESTModule(approveMember3);
+      blockMember4 = /* @__PURE__ */ createRESTModule(blockMember3);
+      disconnectMember4 = /* @__PURE__ */ createRESTModule(disconnectMember3);
+      deleteMember4 = /* @__PURE__ */ createRESTModule(deleteMember3);
+      deleteMyMember4 = /* @__PURE__ */ createRESTModule(deleteMyMember3);
+      bulkDeleteMembers4 = /* @__PURE__ */ createRESTModule(bulkDeleteMembers3);
+      bulkDeleteMembersByFilter4 = /* @__PURE__ */ createRESTModule(bulkDeleteMembersByFilter3);
+      bulkApproveMembers4 = /* @__PURE__ */ createRESTModule(bulkApproveMembers3);
+      bulkBlockMembers4 = /* @__PURE__ */ createRESTModule(bulkBlockMembers3);
+      createMember4 = /* @__PURE__ */ createRESTModule(createMember3);
+      updateMember4 = /* @__PURE__ */ createRESTModule(updateMember3);
+      deleteMemberPhones4 = /* @__PURE__ */ createRESTModule(deleteMemberPhones3);
+      deleteMemberEmails4 = /* @__PURE__ */ createRESTModule(deleteMemberEmails3);
+      deleteMemberAddresses4 = /* @__PURE__ */ createRESTModule(deleteMemberAddresses3);
+      queryMembers4 = /* @__PURE__ */ createRESTModule(customQueryMembers);
+      onMemberCreated2 = createEventModule(onMemberCreated);
+      onMemberDeleted2 = createEventModule(onMemberDeleted);
+      onMemberUpdated2 = createEventModule(onMemberUpdated);
+    }
+  });
+
+  // node_modules/@wix/auto_sdk_members_member-privacy-settings/build/es/index.mjs
+  var init_es19 = __esm({
+    "node_modules/@wix/auto_sdk_members_member-privacy-settings/build/es/index.mjs"() {
+    }
+  });
+
+  // node_modules/@wix/auto_sdk_members_member-report/build/es/index.mjs
+  var utils7, onMemberReportCreated, onMemberReportDeleted, onMemberReportReportedMemberCreated, onMemberReportReportedMemberDeleted, onMemberReportCreated2, onMemberReportDeleted2, onMemberReportReportedMemberCreated2, onMemberReportReportedMemberDeleted2;
+  var init_es20 = __esm({
+    "node_modules/@wix/auto_sdk_members_member-report/build/es/index.mjs"() {
+      init_rename_all_nested_keys();
+      init_timestamp();
+      init_transform_paths();
+      init_browser2();
+      init_query_builder_utils();
+      init_event_definition_modules();
+      utils7 = {
+        query: {
+          ...createQueryUtils()
+        }
+      };
+      onMemberReportCreated = EventDefinition(
+        "wix.members.v1.member_report_created",
+        true,
+        (event) => renameKeysFromRESTResponseToSDKResponse(
+          transformPaths(event, [
+            {
+              transformFn: transformRESTTimestampToSDKTimestamp,
+              paths: [
+                { path: "entity.createdDate" },
+                { path: "metadata.eventTime" }
+              ]
+            }
+          ])
+        )
+      )();
+      onMemberReportDeleted = EventDefinition(
+        "wix.members.v1.member_report_deleted",
+        true,
+        (event) => renameKeysFromRESTResponseToSDKResponse(
+          transformPaths(event, [
+            {
+              transformFn: transformRESTTimestampToSDKTimestamp,
+              paths: [
+                { path: "undefined.createdDate" },
+                { path: "metadata.eventTime" }
+              ]
+            }
+          ])
+        )
+      )();
+      onMemberReportReportedMemberCreated = EventDefinition(
+        "wix.members.v1.member_report_reported_member_created",
+        true,
+        (event) => renameKeysFromRESTResponseToSDKResponse(
+          transformPaths(event, [
+            {
+              transformFn: transformRESTTimestampToSDKTimestamp,
+              paths: [
+                { path: "data.reportedMember.lastReportDate" },
+                { path: "metadata.eventTime" }
+              ]
+            }
+          ])
+        )
+      )();
+      onMemberReportReportedMemberDeleted = EventDefinition(
+        "wix.members.v1.member_report_reported_member_deleted",
+        true,
+        (event) => renameKeysFromRESTResponseToSDKResponse(
+          transformPaths(event, [
+            {
+              transformFn: transformRESTTimestampToSDKTimestamp,
+              paths: [{ path: "metadata.eventTime" }]
+            }
+          ])
+        )
+      )();
+      onMemberReportCreated2 = createEventModule(
+        onMemberReportCreated
+      );
+      onMemberReportDeleted2 = createEventModule(
+        onMemberReportDeleted
+      );
+      onMemberReportReportedMemberCreated2 = createEventModule(
+        onMemberReportReportedMemberCreated
+      );
+      onMemberReportReportedMemberDeleted2 = createEventModule(
+        onMemberReportReportedMemberDeleted
+      );
+    }
+  });
+
+  // node_modules/@wix/auto_sdk_members_member-role-definition/build/es/index.mjs
+  var init_es21 = __esm({
+    "node_modules/@wix/auto_sdk_members_member-role-definition/build/es/index.mjs"() {
+    }
+  });
+
+  // node_modules/@wix/auto_sdk_members_member-to-member-block/build/es/index.mjs
+  var init_es22 = __esm({
+    "node_modules/@wix/auto_sdk_members_member-to-member-block/build/es/index.mjs"() {
+    }
+  });
+
+  // node_modules/@wix/auto_sdk_members_authorization/build/es/index.mjs
+  var init_es23 = __esm({
+    "node_modules/@wix/auto_sdk_members_authorization/build/es/index.mjs"() {
+    }
+  });
+
+  // node_modules/@wix/auto_sdk_members_member-followers/build/es/index.mjs
+  var onFollowMemberFollowed, onFollowMemberUnfollowed, onFollowMemberFollowed2, onFollowMemberUnfollowed2;
+  var init_es24 = __esm({
+    "node_modules/@wix/auto_sdk_members_member-followers/build/es/index.mjs"() {
+      init_rename_all_nested_keys();
+      init_timestamp();
+      init_transform_paths();
+      init_browser2();
+      init_event_definition_modules();
+      onFollowMemberFollowed = EventDefinition(
+        "wix.members.v3.follow_member_followed",
+        true,
+        (event) => renameKeysFromRESTResponseToSDKResponse(
+          transformPaths(event, [
+            {
+              transformFn: transformRESTTimestampToSDKTimestamp,
+              paths: [{ path: "metadata.eventTime" }]
+            }
+          ])
+        )
+      )();
+      onFollowMemberUnfollowed = EventDefinition(
+        "wix.members.v3.follow_member_unfollowed",
+        true,
+        (event) => renameKeysFromRESTResponseToSDKResponse(
+          transformPaths(event, [
+            {
+              transformFn: transformRESTTimestampToSDKTimestamp,
+              paths: [{ path: "metadata.eventTime" }]
+            }
+          ])
+        )
+      )();
+      onFollowMemberFollowed2 = createEventModule(
+        onFollowMemberFollowed
+      );
+      onFollowMemberUnfollowed2 = createEventModule(
+        onFollowMemberUnfollowed
+      );
+    }
+  });
+
+  // node_modules/@wix/members/build/es/index.mjs
+  var init_es25 = __esm({
+    "node_modules/@wix/members/build/es/index.mjs"() {
+      init_es8();
+      init_es9();
+      init_es10();
+      init_es11();
+      init_es12();
+      init_es13();
+      init_es14();
+      init_es15();
+      init_es16();
+      init_es17();
+      init_es18();
+      init_es19();
+      init_es20();
+      init_es21();
+      init_es22();
+      init_es23();
+      init_es24();
+    }
+  });
+
   // public/consultant-login.js
   var require_consultant_login = __commonJS({
     "public/consultant-login.js"() {
       init_build();
       init_esm();
-      var BACKEND = "https://test-wix-consultant.zend-apps.com";
+      init_es25();
+      var BACKEND = "https://test-consultation-app.zend-apps.com";
       var REACT = "https://viewy-hyperintelligently-toshiko.ngrok-free.dev";
       var wixClient = createClient({
         auth: site.auth(),
         host: site.host({
           applicationId: "e87fc4f0-d74b-463f-ad77-b813eec84846"
-        })
+        }),
+        modules: {
+          members: es_exports6
+        }
       });
       var ConsultantLogin = class extends HTMLElement {
         constructor() {
@@ -1818,9 +5243,8 @@ var ConsultantWidget = (() => {
               const response = await wixClient.fetchWithAuth(
                 `${BACKEND}/api/wix/get-instance`
               );
-              if (!response.ok) {
+              if (!response.ok)
                 throw new Error(`get-instance HTTP ${response.status}`);
-              }
               const data = await response.json();
               this.instanceId = data.instanceId || data.instance || null;
               this.instance = data.instance || this.instanceId || null;
@@ -1837,47 +5261,43 @@ var ConsultantWidget = (() => {
         }
         async connectedCallback() {
           console.log("\u{1F504} Widget connected...");
-          const memberPromise = this.waitForMember();
           await this.fetchInstance();
-          await memberPromise;
+          await this.waitForMember();
           if (!this.instance) {
-            console.error(
-              "\u274C No Wix instance \u2014 check app is installed, applicationId matches, and BACKEND URL is allowed in the Wix app"
-            );
+            console.error("\u274C No Wix instance");
           }
           const token = localStorage.getItem("token");
           const isLoggedIn = localStorage.getItem("consultant_logged_in");
           this.createIframe(token && isLoggedIn === "true" ? "dashboard" : "login");
         }
-        waitForMember() {
-          return new Promise((resolve) => {
-            if (window.parent?.wixUserId) {
-              console.log("\u2705 globalThis se mila");
-              this._processMember(
-                {
-                  type: "WIX_MEMBER",
-                  memberId: window.parent.wixUserId,
-                  email: window.parent.wixUserEmail
-                },
-                resolve
-              );
+        async waitForMember() {
+          try {
+            console.log("\u{1F504} Getting current member...");
+            const response = await wixClient.members.getCurrentMember({
+              fieldsets: ["FULL"]
+            });
+            if (!response?.member) {
+              console.log("\u274C Guest user \u2014 not logged in");
               return;
             }
-            const timeout = setTimeout(() => {
-              console.warn("\u26A0\uFE0F Timeout \u2014 guest user");
-              resolve();
-            }, 15e3);
-            const handler = async (event) => {
-              if (event.data?.type !== "WIX_MEMBER") return;
-              console.log("\u2705 WIX_MEMBER pakda:", event.data.email);
-              window.postMessage({ type: "WIX_MEMBER_RECEIVED" }, "*");
-              clearTimeout(timeout);
-              window.removeEventListener("message", handler);
-              await this._processMember(event.data, resolve);
-            };
-            window.addEventListener("message", handler);
-            console.log("\u{1F442} Listener ready");
-          });
+            const member = response.member;
+            console.log("\u2705 Member found:", member.loginEmail);
+            console.log("\u2705 Member found:", JSON.stringify(member, null, 2));
+            await this._processMember(
+              {
+                type: "WIX_MEMBER",
+                memberId: member._id,
+                email: member.loginEmail,
+                firstName: member.contact?.firstName || member.profile?.nickname || "",
+                lastName: member.contact?.lastName || "",
+                photo: member.profile?.photo?.url || ""
+              },
+              () => {
+              }
+            );
+          } catch (err) {
+            console.error("\u274C waitForMember error:", err.message);
+          }
         }
         async _processMember(data, resolve) {
           try {
@@ -1990,8 +5410,12 @@ var ConsultantWidget = (() => {
           console.log("\u2705 Iframe loaded:", iframe.src);
         }
       };
+      if (!customElements.get("consultly-widget")) {
+        customElements.define("consultly-widget", ConsultantLogin);
+      }
       if (!customElements.get("our-consultant")) {
-        customElements.define("our-consultant", ConsultantLogin);
+        customElements.define("our-consultant", class extends ConsultantLogin {
+        });
       }
     }
   });

@@ -1,6 +1,6 @@
 /* Dashboard Wrapper — content height for Wix iframe (no 100vh loop) */
 .dashboardWrapper {
-    min-height: 500px;
+    /* No min-height: the iframe height is measured from real content. */
     height: auto;
     background-color: #f5f6fa;
     /* font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
@@ -74,53 +74,6 @@
     border-radius: 0;
 }
 
-.dashboardWrapper.videoCallMode .mobileToggleButton {
-    display: none;
-}
-
-/* Mobile Toggle Button */
-.mobileToggleButton {
-    display: none;
-    position: fixed;
-    top: 16px;
-    left: 16px;
-    z-index: 1000;
-    width: 44px;
-    height: 44px;
-    border-radius: 8px;
-    border: 1px solid #e9ecef;
-    background: white;
-    color: #212529;
-    cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s ease;
-}
-
-.mobileToggleButton:hover {
-    background: #f8f9fa;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.mobileToggleButton svg {
-    width: 24px;
-    height: 24px;
-}
-
-/* Mobile Overlay */
-.mobileOverlay {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 999;
-    animation: fadeIn 0.2s ease;
-}
-
 @keyframes fadeIn {
     from {
         opacity: 0;
@@ -143,182 +96,6 @@
     height: auto;
 }
 
-/* DEPRECATED — the sidebar was replaced by DashboardTopNav in the Wix embed.
- * Rules kept (neutralised) so any stale reference cannot resurrect a
- * position:fixed panel overlaying dashboard content inside the iframe. */
-.sideNav {
-    display: none;
-}
-
-/* Profile Section */
-.profileSection {
-    padding: 20px;
-    border-bottom: 1px solid #e9ecef;
-    background: #ffffff;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 12px;
-    flex-shrink: 0;
-}
-
-.profileImage {
-    width: 80px;
-    height: 80px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #ffffff;
-    overflow: hidden;
-    box-shadow: rgba(0, 0, 0, 0.1) 0px 4px 12px;
-    border: 3px solid #fdfdfd;
-}
-
-.profileImage img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    border-radius: 50%;
-}
-
-.profileImage svg {
-    width: 40px;
-    height: 40px;
-}
-
-.profileDetails {
-    text-align: center;
-    width: 100%;
-}
-
-.profileName {
-    font-size: 14px;
-    font-weight: 600;
-    color: #212529;
-    margin-bottom: 4px;
-}
-
-.profileEmail {
-    font-size: 13px;
-    color: #6c757d;
-}
-
-.profileButton {
-    width: 100%;
-    padding: 10px 16px;
-    margin-top: 12px;
-    border-radius: 8px;
-    border: 1px solid #090905;
-    background: transparent;
-    color: #11110f;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-}
-
-.profileButton:hover {
-    background: #060708;
-    color: white;
-}
-
-.profileButton svg {
-    width: 16px;
-    height: 16px;
-    stroke-width: 2.5;
-}
-
-/* Navigation Tabs */
-.navTabs {
-    flex: 1;
-    overflow-y: auto;
-    padding: 16px 0;
-}
-
-.navTabList {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
-
-.navTabList li {
-    margin: 0;
-}
-
-.navTab {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 14px 20px;
-    background: transparent;
-    border: none;
-    color: #6c757d;
-    text-align: left;
-    cursor: pointer;
-    transition: all 0.25s ease;
-    font-size: 15px;
-    font-weight: 500;
-    border-left: 3px solid transparent;
-    position: relative;
-    justify-content: flex-start;
-}
-
-.navTab:hover {
-    background: #f1f3f5;
-    color: #212529;
-}
-
-.navTab:hover .navTabIcon {
-    color: #4a90e2;
-}
-
-.navTab:focus {
-    outline: 2px solid #4a90e2;
-    outline-offset: 2px;
-}
-
-.navTabActive {
-    background: rgba(74, 144, 226, 0.1);
-    color: #4a90e2;
-    font-weight: 600;
-    border-left-color: #4a90e2;
-}
-
-.navTabActive .navTabIcon {
-    color: #4a90e2;
-}
-
-.navTabIcon {
-    min-width: 22px;
-    width: 22px;
-    height: 22px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.25s ease;
-    color: inherit;
-    flex-shrink: 0;
-}
-
-.navTabIcon svg {
-    width: 20px;
-    height: 20px;
-    stroke-width: 2;
-    transition: all 0.2s ease;
-}
-
-.navTabLabel {
-    white-space: nowrap;
-    flex: 1;
-    font-size: 13px;
-}
-
 /* Content Area
  * margin-left: 260px removed — it compensated for the fixed sidebar, which no
  * longer exists. Inside the Wix iframe it produced a permanent blank gutter. */
@@ -330,7 +107,6 @@
     background: white;
     border-radius: 0;
 }
-
 
 /* Content
  * overflow-y: auto removed — it created a scroll region inside the iframe's own
@@ -377,7 +153,6 @@
     line-height: 1.6;
 }
 
-
 /* Overlay for mobile */
 .overlay {
     display: none;
@@ -394,6 +169,7 @@
         margin-left: 0; /* sidebar removed */
         /* 240px sidebar + 20px gap */
     }
+
 }
 
 /* Responsive Design - Tablet */
@@ -411,42 +187,15 @@
     .content {
         padding: 24px;
     }
+
 }
 
 /* Responsive Design - Mobile */
 @media (max-width: 768px) {
 
-    .mobileToggleButton {
-        display: flex;
-    }
-
-    .mobileOverlay {
-        display: block;
-    }
-
     .mainContainer {
         flex-direction: column;
         gap: 0;
-    }
-
-    .sideNav {
-        width: 280px;
-        position: fixed;
-        left: -300px;
-        top: 0;
-        bottom: 0;
-        height: auto;
-        max-height: 100%;
-        z-index: 1000;
-        border-radius: 0;
-        border-right: 1px solid #e9ecef;
-        border-bottom: none;
-        transition: left 0.3s ease;
-        box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
-    }
-
-    .sideNavOpen {
-        left: 0;
     }
 
     .contentArea {
@@ -457,64 +206,6 @@
 
     .content {
         padding: 20px;
-    }
-
-
-    .profileSection {
-        padding: 16px;
-    }
-
-    .profileImage {
-        width: 60px;
-        height: 60px;
-    }
-
-    .profileImage svg {
-        width: 35px;
-        height: 35px;
-    }
-
-    .profileName {
-        font-size: 15px;
-    }
-
-    .profileEmail {
-        font-size: 12px;
-    }
-
-    .navTabs {
-        padding: 12px 0;
-        overflow-y: auto;
-        overflow-x: hidden;
-        flex: 1;
-    }
-
-    .navTabList {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        padding: 0;
-        list-style: none;
-    }
-
-    .navTabList li {
-        margin: 0;
-    }
-
-    .navTab {
-        padding: 12px 16px;
-        border-left: 3px solid transparent;
-        border-bottom: none;
-        border-radius: 0;
-        white-space: nowrap;
-        width: 100%;
-        text-align: left;
-    }
-
-    .navTabActive {
-        border-left-color: #4a90e2;
-        border-bottom: none;
-        background-color: #e8f4fd;
     }
 
     .contentArea {
@@ -533,76 +224,11 @@
     .welcomeCard h2 {
         font-size: 24px;
     }
+
 }
 
 /* Responsive Design - Small Mobile */
 @media (max-width: 576px) {
-
-    .mobileToggleButton {
-        top: 12px;
-        left: 12px;
-        width: 40px;
-        height: 40px;
-    }
-
-    .mobileToggleButton svg {
-        width: 20px;
-        height: 20px;
-    }
-
-    .sideNav {
-        width: 260px;
-    }
-
-    .profileSection {
-        padding: 12px;
-    }
-
-    .profileImage {
-        width: 50px;
-        height: 50px;
-    }
-
-    .profileImage svg {
-        width: 30px;
-        height: 30px;
-    }
-
-    .profileName {
-        font-size: 14px;
-    }
-
-    .profileEmail {
-        font-size: 11px;
-    }
-
-    .profileButton {
-        padding: 8px 12px;
-        font-size: 12px;
-    }
-
-    .navTab {
-        padding: 10px 14px;
-        font-size: 14px;
-    }
-
-    /* .navTabIcon svg {
-        width: 18px;
-        height: 18px;
-    } */
-    .navTabIcon {
-        background: #eaf3ff;
-        padding: 6px;
-        border-radius: 4px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-
-    .navTabActive .navTabIcon {
-        background: #0d6efd;
-        color: white;
-    }
 
     .contentArea {
         border-radius: 8px;
@@ -610,49 +236,6 @@
 
     .content {
         padding: 16px;
-    }
-
-
-    .profileSection {
-        padding: 12px;
-    }
-
-    .profileImage {
-        width: 50px;
-        height: 50px;
-    }
-
-    .profileImage svg {
-        width: 30px;
-        height: 30px;
-    }
-
-    .profileName {
-        font-size: 14px;
-    }
-
-    .profileEmail {
-        font-size: 11px;
-    }
-
-    .profileButton {
-        padding: 8px 12px;
-        font-size: 12px;
-    }
-
-    .profileButton svg {
-        width: 12px;
-        height: 12px;
-    }
-
-    .navTab {
-        padding: 8px 12px;
-        font-size: 14px;
-    }
-
-    .navTabIcon svg {
-        width: 18px;
-        height: 18px;
     }
 
     .contentArea {
@@ -674,24 +257,7 @@
     .welcomeCard p {
         font-size: 14px;
     }
-}
 
-/* Scrollbar Styling */
-.navTabs::-webkit-scrollbar {
-    width: 6px;
-}
-
-.navTabs::-webkit-scrollbar-track {
-    background: #f1f3f5;
-}
-
-.navTabs::-webkit-scrollbar-thumb {
-    background: #dee2e6;
-    border-radius: 3px;
-}
-
-.navTabs::-webkit-scrollbar-thumb:hover {
-    background: #ced4da;
 }
 
 .content::-webkit-scrollbar {

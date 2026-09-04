@@ -1,0 +1,197 @@
+/*
+ * Consultant dashboard design language.
+ *
+ * WHY THIS IS A PLAIN STYLESHEET, NOT A COMPONENT:
+ * The dashboard has seven pages, each with its own CSS module. Giving them a
+ * shared look by editing all seven — or by wrapping them in new layout
+ * components — would duplicate UI and create exactly the layered-navigation
+ * mess we just removed. Instead these rules are scoped under
+ * `.consultant-dashboard-shell`, so every page inherits one design language
+ * without a single new wrapper component.
+ *
+ * IFRAME CONTRACT: no `position: fixed`, no `vh` units, no hardcoded page
+ * heights. Content flows naturally so sendIframeHeightToParent() can measure a
+ * true height and the Wix iframe grows or shrinks to fit.
+ */
+
+.consultant-dashboard-shell {
+  /* Type */
+  --cds-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+
+  /* Surfaces */
+  --cds-bg: #f7f7f9;
+  --cds-surface: #ffffff;
+  --cds-surface-alt: #fafafb;
+
+  /* Ink */
+  --cds-text: #1a1a1f;
+  --cds-text-muted: #6b6b76;
+  --cds-text-subtle: #93939e;
+
+  /* Lines */
+  --cds-border: #e7e7ed;
+  --cds-border-strong: #d6d6de;
+
+  /* Accents */
+  --cds-accent: #1a1a1f;
+  --cds-accent-ink: #ffffff;
+  --cds-danger: #b4231d;
+  --cds-success: #1f7a4d;
+  --cds-warning: #9a6b08;
+
+  /* Rhythm — one radius/shadow scale for every page */
+  --cds-radius: 10px;
+  --cds-radius-sm: 7px;
+  --cds-gap: 14px;
+  --cds-shadow: 0 1px 2px rgba(18, 18, 26, 0.05);
+  --cds-shadow-lift: 0 4px 14px rgba(18, 18, 26, 0.09);
+
+  font-family: var(--cds-font);
+  color: var(--cds-text);
+  background: var(--cds-bg);
+}
+
+/* ── Typography scale ───────────────────────────────────────── */
+.consultant-dashboard-shell h1 { font-size: 20px; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 4px; }
+.consultant-dashboard-shell h2 { font-size: 17px; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 4px; }
+.consultant-dashboard-shell h3 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+.consultant-dashboard-shell h4 { font-size: 13.5px; font-weight: 600; margin: 0 0 4px; }
+.consultant-dashboard-shell p  { font-size: 13.5px; line-height: 1.55; color: var(--cds-text-muted); }
+
+
+/* ── Cards ──────────────────────────────────────────────────── */
+.consultant-dashboard-shell .cds-card {
+  border-radius: var(--cds-radius);
+  box-shadow: var(--cds-shadow);
+  border: 1px solid var(--cds-border);
+  background: var(--cds-surface);
+  box-sizing: border-box;
+}
+
+/* ── Buttons ────────────────────────────────────────────────── */
+.consultant-dashboard-shell button {
+  font-family: var(--cds-font);
+  font-size: 13px;
+  border-radius: var(--cds-radius-sm);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.consultant-dashboard-shell button:focus-visible {
+  outline: 2px solid var(--cds-accent);
+  outline-offset: 2px;
+}
+
+.consultant-dashboard-shell button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ── Tables ─────────────────────────────────────────────────── */
+.consultant-dashboard-shell table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  background: var(--cds-surface);
+}
+
+.consultant-dashboard-shell thead th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+  color: var(--cds-text-subtle);
+  background: var(--cds-surface-alt);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--cds-border);
+  white-space: nowrap;
+}
+
+.consultant-dashboard-shell tbody td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--cds-border);
+  color: var(--cds-text);
+  vertical-align: middle;
+}
+
+.consultant-dashboard-shell tbody tr:last-child td { border-bottom: none; }
+.consultant-dashboard-shell tbody tr:hover { background: var(--cds-surface-alt); }
+
+/*
+ * Wide tables scroll horizontally inside their own container, so the dashboard
+ * page itself never scrolls sideways inside the Wix iframe.
+ */
+.consultant-dashboard-shell .cds-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--cds-border);
+  border-radius: var(--cds-radius);
+  background: var(--cds-surface);
+}
+
+/* ── Forms ──────────────────────────────────────────────────── */
+.consultant-dashboard-shell input,
+.consultant-dashboard-shell select,
+.consultant-dashboard-shell textarea {
+  font-family: var(--cds-font);
+  font-size: 13.5px;
+  color: var(--cds-text);
+  background: var(--cds-surface);
+  border: 1px solid var(--cds-border-strong);
+  border-radius: var(--cds-radius-sm);
+  padding: 9px 11px;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.consultant-dashboard-shell input:focus,
+.consultant-dashboard-shell select:focus,
+.consultant-dashboard-shell textarea:focus {
+  outline: none;
+  border-color: var(--cds-accent);
+  box-shadow: 0 0 0 3px rgba(26, 26, 31, 0.08);
+}
+
+.consultant-dashboard-shell label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--cds-text);
+}
+
+/* ── Empty states ───────────────────────────────────────────── */
+.consultant-dashboard-shell .cds-empty {
+  text-align: center;
+  color: var(--cds-text-muted);
+  font-size: 13.5px;
+  /* Compact by design: an empty page must not inflate the iframe. */
+  padding: 30px 18px;
+  background: var(--cds-surface);
+  border: 1px dashed var(--cds-border-strong);
+  border-radius: var(--cds-radius);
+}
+
+/* ── Status pills ───────────────────────────────────────────── */
+.consultant-dashboard-shell .cds-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+
+/* ── Iframe safety net ──────────────────────────────────────── */
+/* Nothing inside the dashboard may pin itself to the iframe viewport or force a
+ * viewport-derived height — both break embedding. */
+.consultant-dashboard-shell { overflow-x: hidden; }
+
+@media (max-width: 640px) {
+  .consultant-dashboard-shell h1 { font-size: 18px; }
+  .consultant-dashboard-shell h2 { font-size: 16px; }
+  .consultant-dashboard-shell thead th,
+  .consultant-dashboard-shell tbody td { padding: 9px 10px; }
+}

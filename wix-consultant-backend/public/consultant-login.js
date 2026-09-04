@@ -7,6 +7,12 @@ import { members } from "@wix/members";
 // Auto-detect domain - works on any domain automatically
 const BACKEND = "https://test-consultation-app.zend-apps.com";
 const REACT = "https://viewy-hyperintelligently-toshiko.ngrok-free.dev";
+
+// Sanity bounds for the measured iframe height. These are guard rails against a
+// broken measurement, NOT a layout height — the real height comes from the
+// React app's ResizeObserver via the IFRAME_HEIGHT message.
+const MIN_IFRAME_H = 120;
+const MAX_IFRAME_H = 6000;
 const wixClient = createClient({
   auth: site.auth(),
   host: site.host({
@@ -336,10 +342,25 @@ class ConsultantLogin extends HTMLElement {
 
     window.addEventListener("message", (event) => {
       if (event.data?.type === "IFRAME_HEIGHT") {
-        const h = Math.max(defaultH, Number(event.data.height) || defaultH);
+        // Only accept height messages from THIS widget's own iframe. Without
+        // this check any page or embed could resize our frame.
+        if (event.source !== iframe.contentWindow) {
+          console.warn("[WIDGET] ignored IFRAME_HEIGHT from a foreign window");
+          return;
+        }
+
+        const reported = Number(event.data.height);
+        if (!Number.isFinite(reported) || reported <= 0) return;
+
+        // Clamp to sane bounds only — NOT to defaultH. The previous code used
+        // Math.max(defaultH, reported), which pinned the dashboard iframe at
+        // 920px forever: it could grow but never shrink, so short pages left a
+        // large blank area. defaultH is now purely the pre-measurement height.
+        const h = Math.min(Math.max(reported, MIN_IFRAME_H), MAX_IFRAME_H);
+
         iframe.style.height = h + "px";
-        iframe.style.minHeight = h + "px";
-        this.style.minHeight = h + "px";
+        iframe.style.minHeight = "0";
+        this.style.minHeight = "0";
         return;
       }
 

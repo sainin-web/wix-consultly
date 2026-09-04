@@ -5219,6 +5219,8 @@ var ConsultantWidget = (() => {
       init_es25();
       var BACKEND = "https://test-consultation-app.zend-apps.com";
       var REACT = "https://viewy-hyperintelligently-toshiko.ngrok-free.dev";
+      var MIN_IFRAME_H = 120;
+      var MAX_IFRAME_H = 6e3;
       var wixClient = createClient({
         auth: site.auth(),
         host: site.host({
@@ -5492,10 +5494,16 @@ var ConsultantWidget = (() => {
           iframe.allow = "camera; microphone";
           window.addEventListener("message", (event) => {
             if (event.data?.type === "IFRAME_HEIGHT") {
-              const h = Math.max(defaultH, Number(event.data.height) || defaultH);
+              if (event.source !== iframe.contentWindow) {
+                console.warn("[WIDGET] ignored IFRAME_HEIGHT from a foreign window");
+                return;
+              }
+              const reported = Number(event.data.height);
+              if (!Number.isFinite(reported) || reported <= 0) return;
+              const h = Math.min(Math.max(reported, MIN_IFRAME_H), MAX_IFRAME_H);
               iframe.style.height = h + "px";
-              iframe.style.minHeight = h + "px";
-              this.style.minHeight = h + "px";
+              iframe.style.minHeight = "0";
+              this.style.minHeight = "0";
               return;
             }
             if (event.data?.tokenGenerated === true) {

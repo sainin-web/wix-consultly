@@ -13,7 +13,6 @@ import { fetchConsultantById } from "../Redux/slices/ConsultantSlices";
 import ConsultantProfileModal from "./ConsultantProfileModal";
 import axios from "axios";
 import DashboardTopNav, { NAV_ICONS } from "./DashboardTopNav";
-import { sendIframeHeightToParent } from "../middle-ware/iframeResize";
 
 const isWixEmbed = () =>
   typeof window !== "undefined" && window.self !== window.top;
@@ -179,18 +178,12 @@ function TabNavigation({ children }) {
     navigate(`${path}${search}`);
   };
 
-  useEffect(() => {
-    if (!isWixEmbed()) return;
-    sendIframeHeightToParent();
-    const t1 = setTimeout(sendIframeHeightToParent, 120);
-    const t2 = setTimeout(sendIframeHeightToParent, 450);
-    const t3 = setTimeout(sendIframeHeightToParent, 1200);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-    };
-  }, [location.pathname]);
+  /*
+   * Height reporting is handled globally by useAutoResizeIframe()'s
+   * ResizeObserver. The old setTimeout chain (120/450/1200ms) guessed at when
+   * content would finish rendering; the observer reacts to the actual layout
+   * change instead, so those timers are no longer needed.
+   */
 
   const consultant = consultantOverview?.consultant;
   const displayName =
@@ -200,11 +193,8 @@ function TabNavigation({ children }) {
       .filter(Boolean)
       .join(" ")
       .trim();
-  const displayEmail =
-    consultant?.email ||
-    localStorage.getItem("consultant_display_email") ||
-    localStorage.getItem("wix_email") ||
-    "";
+  // Email intentionally not shown in the nav — it appears in the profile modal.
+  // Repeating it in the header duplicated the same consultant details twice.
 
   const rawImage = consultant?.profileImage;
   const imageUrl = rawImage

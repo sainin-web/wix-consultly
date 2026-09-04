@@ -258,6 +258,23 @@ const DashboardPage = () => {
                 </tr>
               </thead>
               <tbody>
+                {/* Compact empty state — an empty table must not inflate the
+                    measured iframe height with blank rows. */}
+                {(!userData || userData.length === 0) && (
+                  <tr>
+                    <td colSpan={99} style={{ padding: 0, border: "none" }}>
+                      <div className="cds-empty">
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                          No consultations yet
+                        </div>
+                        <div style={{ fontSize: 12.5 }}>
+                          Client consultations will appear here when you receive
+                          them.
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
                 {userData?.map((consultation) => {
                   console.log("Consultation Record:", consultation);
                   return (

@@ -15,6 +15,9 @@
   } from "./components/Redux/slices/wixAuthSlice";
   import "./App.css";
   import "./css/saas-theme.css";
+  // Shared design language for every consultant dashboard page. Scoped to
+  // .consultant-dashboard-shell, so it cannot affect the public storefront.
+  import "./css/dashboard-theme.css";
 
   import GlobalMessageNotification from "./components/AlertModel/GlobalMessageNotification";
   import IncomingCallAlert from "./components/AlertModel/IncommingCallAlert";

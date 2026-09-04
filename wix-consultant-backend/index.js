@@ -33,7 +33,7 @@ app.get("/api/our/consultant", (req, res) => {
 });
 
 // Wix Custom Element Script URL — must match the Script URL configured in Wix Studio
-app.get("/consultly-widget.js", (req, res) => {
+app.get("/api/consultly-widget.js", (req, res) => {
   const bundlePath = path.join(__dirname, "public", "consultant-login-bundle.js");
 
   console.log("\n========== WIDGET SCRIPT REQUEST ==========");

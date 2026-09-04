@@ -4,18 +4,15 @@ import "bootstrap/dist/css/bootstrap.min.css";
 import styles from "../../components/ConsultantDashboard/TabNavigation.module.css";
 import { useDispatch, useSelector } from "react-redux";
 import { ensureSocketRegistered, SOCKET_ROLE } from "../Sokect-io/SokectConfig";
-import { getConsultantId, getShopId } from "../../utils/wixStorage";
+import {
+  getConsultantId,
+  getShopId,
+  clearConsultantSession,
+} from "../../utils/wixStorage";
 import { fetchConsultantById } from "../Redux/slices/ConsultantSlices";
 import ConsultantProfileModal from "./ConsultantProfileModal";
 import axios from "axios";
-import {
-  HiOutlineSquares2X2,
-  HiOutlineChatBubbleLeftRight,
-  HiOutlineClipboardDocumentList,
-  HiOutlineBanknotes,
-  HiOutlineArrowDownTray,
-} from "react-icons/hi2";
-import TopHeader from "./TopHeader";
+import DashboardTopNav, { NAV_ICONS } from "./DashboardTopNav";
 import { sendIframeHeightToParent } from "../middle-ware/iframeResize";
 
 const isWixEmbed = () =>
@@ -24,7 +21,6 @@ const isWixEmbed = () =>
 function TabNavigation({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userId, setUserId] = useState();
   const [shopId, setShopId] = useState();
   const [showModal, setShowModal] = useState(false);
@@ -126,64 +122,55 @@ function TabNavigation({ children }) {
     }
   }, [location.search, location.pathname, navigate]);
 
-  useEffect(() => {
-    if (window.innerWidth <= 768) {
-      setSidebarOpen(false);
-    }
-  }, [location.pathname]);
-
-  useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth > 768) {
-        setSidebarOpen(false);
-      }
-    };
-
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
-  const toggleSidebar = () => {
-    setSidebarOpen(!sidebarOpen);
-  };
-
+  // `collapseClass` controls which tabs fold into the "More" menu as the
+  // viewport narrows — later entries collapse first.
   const menuItems = [
     {
       label: "Dashboard",
       path: "/consultant-dashboard",
       active: location.pathname === "/consultant-dashboard",
-      icon: <HiOutlineSquares2X2 />,
+      icon: NAV_ICONS.dashboard,
+      collapseClass: "collapse1",
     },
     {
       label: "Chats",
       path: "/consultant-dashboard/chats",
       active: location.pathname.startsWith("/consultant-dashboard/chats"),
-      icon: <HiOutlineChatBubbleLeftRight />,
+      icon: NAV_ICONS.chats,
+      collapseClass: "collapse2",
     },
     {
       label: "Call Chat Logs",
+      shortLabel: "Call Logs",
       path: "/consultant-dashboard/call-chat-logs",
       active: location.pathname.startsWith(
         "/consultant-dashboard/call-chat-logs",
       ),
-      icon: <HiOutlineClipboardDocumentList />,
+      icon: NAV_ICONS.callLogs,
+      collapseClass: "collapse3",
     },
     {
       label: "Wallet Management",
+      shortLabel: "Wallet",
       path: "/consultant-dashboard/consultant-wallet-logs",
       active: location.pathname.startsWith(
         "/consultant-dashboard/consultant-wallet-logs",
       ),
-      icon: <HiOutlineBanknotes />,
+      icon: NAV_ICONS.wallet,
+      collapseClass: "collapse4",
     },
 
     {
       label: "Withdrawal Request",
+      shortLabel: "Withdrawals",
+      // Both the table and the form live under the consultant dashboard; the
+      // form stays reachable via the button inside WithdrawalRequestTable.
       path: "/consultant-dashboard/withdrawal-request-table",
       active: location.pathname.startsWith(
-        "/consultant-dashboard/withdrawal-request-table",
+        "/consultant-dashboard/withdrawal-request",
       ),
-      icon: <HiOutlineArrowDownTray />,
+      icon: NAV_ICONS.withdrawals,
+      collapseClass: "collapse4",
     },
   ];
 
@@ -229,10 +216,43 @@ function TabNavigation({ children }) {
     location.pathname === "/video-call" ||
     location.pathname.startsWith("/video-call");
 
+  // Preserve the Wix instance across navigation so WixInstanceGuard keeps passing.
+  const instanceQuery =
+    location.search ||
+    (localStorage.getItem("wix_instance")
+      ? `?instance=${localStorage.getItem("wix_instance")}`
+      : "");
+
+  /**
+   * Browse the public storefront WITHOUT ending the consultant session.
+   * Separate from logout by design — the session keys are left intact, so the
+   * "Consultant Login" link routes straight back into the dashboard.
+   */
+  const handleViewStorefront = () => {
+    console.log("[DASHBOARD] View Storefront — session preserved");
+    navigate(`/consultant/card${instanceQuery}`);
+  };
+
+  /**
+   * Clears only consultant auth keys and returns to the public storefront.
+   *
+   * Previously this removed just "token"/"shop" and then set
+   * window.top.location.href to `${REACT_APP_FRONTEND_HOST}/login` — an env var
+   * that is not defined, so it navigated the whole Wix page to "undefined/login"
+   * and broke out of the embed. Now it stays inside the iframe and uses the
+   * canonical clear helper, which preserves wix_instance.
+   */
   const handleLogout = () => {
-    localStorage.removeItem("token");
+    console.log("[DASHBOARD] Logout — clearing consultant session");
+    clearConsultantSession();
     localStorage.removeItem("shop");
-    window.top.location.href = `${process.env.REACT_APP_FRONTEND_HOST}/login`;
+    // Tell the Custom Element to swap back to the public storefront iframe.
+    try {
+      window.parent.postMessage({ consultantLoggedOut: true }, "*");
+    } catch (err) {
+      console.warn("[DASHBOARD] could not notify parent widget:", err.message);
+    }
+    navigate(`/consultant/card${instanceQuery}`, { replace: true });
   };
 
   return (
@@ -250,82 +270,19 @@ function TabNavigation({ children }) {
       <div
         className={`${styles.dashboardWrapper} ${isWixEmbed() ? styles.dashboardEmbed : ""} ${isVideoCallPage ? styles.videoCallMode : ""}`}
       >
-        <TopHeader
-          onMenuToggle={toggleSidebar}
-          isSidebarOpen={sidebarOpen}
-          profile={imageUrl}
-          userName={displayName}
-          userEmail={displayEmail}
-          shop={shop}
-        />
-        {/* Mobile Overlay */}
-        {sidebarOpen && (
-          <div className={styles.mobileOverlay} onClick={toggleSidebar}></div>
+        {!isVideoCallPage && (
+          <DashboardTopNav
+            items={menuItems}
+            onNavigate={handleNavigation}
+            onOpenProfile={() => setShowModal(true)}
+            onViewStorefront={handleViewStorefront}
+            onLogout={handleLogout}
+            displayName={displayName}
+            imageUrl={imageUrl}
+          />
         )}
 
         <div className={styles.mainContainer}>
-          {!isVideoCallPage && (
-            <aside
-              className={`${styles.sideNav} ${sidebarOpen ? styles.sideNavOpen : ""}`}
-            >
-              <div className={styles.profileSection}>
-                <div className={styles.profileImage}>
-                  <img
-                    src={
-                      imageUrl ||
-                      "/images/flag/teamdefault.png"
-                    }
-                    alt={displayName || "Consultant"}
-                  />
-                </div>
-                <div className={styles.profileDetails}>
-                  <div className={styles.profileName}>
-                    {displayName || "—"}
-                  </div>
-                  <div className={styles.profileEmail}>
-                    {displayEmail || "—"}
-                  </div>
-                </div>
-                <button
-                  onClick={() => setShowModal(true)}
-                  className={styles.profileButton}
-                >
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                    <circle cx="12" cy="7" r="4" />
-                  </svg>
-                  My Profile
-                </button>
-              </div>
-
-              <nav className={styles.navTabs}>
-                <ul className={styles.navTabList}>
-                  {menuItems.map((item, index) => (
-                    <li key={index}>
-                      <button
-                        className={`${styles.navTab} ${item.active ? styles.navTabActive : ""}`}
-                        onClick={() => handleNavigation(item.path)}
-                        title={item.label}
-                      >
-                        <span className={styles.navTabIcon}>{item.icon}</span>
-                        <span className={styles.navTabLabel}>{item.label}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </nav>
-            </aside>
-          )}
-
           <div className={styles.contentArea}>
             <main className={styles.content}>
               <Outlet context={{ shop }} />

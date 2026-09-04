@@ -100,6 +100,12 @@ const LoginForm = () => {
           force: true,
         });
         // openTokenWindow({ userId, shopId });
+
+        // Session is stored and the socket is registered — go to the dashboard.
+        // This replaces the old FCM/openTokenWindow -> tokenGenerated postMessage
+        // chain, which was severed when openTokenWindow was commented out above.
+        console.log("[AUTH] Consultant login successful — switching to consultant mode");
+        navigate(`/consultant-dashboard${q}`, { replace: true });
       } else {
         setErrors({ email: "Invalid email or password" });
       }

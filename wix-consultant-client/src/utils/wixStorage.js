@@ -124,6 +124,25 @@ export function setConsultantSession({
   notifySocketIdentity();
 }
 
+/**
+ * Mirror of setConsultantSession — clears ONLY consultant auth keys.
+ *
+ * Deliberately preserves Wix context (KEYS.INSTANCE / wix_instance, customer id,
+ * member id, email, photo). Clearing wix_instance would make WixInstanceGuard
+ * show "Access Denied" after logout.
+ */
+export function clearConsultantSession() {
+  localStorage.removeItem(KEYS.CONSULTANT_TOKEN);
+  localStorage.removeItem(KEYS.CONSULTANT_ID);
+  localStorage.removeItem(KEYS.CONSULTANT_LOGGED_IN);
+  localStorage.removeItem("consultant_display_name");
+  localStorage.removeItem("consultant_display_email");
+  localStorage.removeItem("secure_url");
+  LEGACY_CONSULTANT.forEach((k) => localStorage.removeItem(k));
+  setSocketRole(null);
+  notifySocketIdentity();
+}
+
 export function persistCustomerId(dbId, extras = {}) {
   if (!dbId) return;
   const id = String(dbId);

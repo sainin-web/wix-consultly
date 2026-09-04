@@ -7,7 +7,7 @@
     /* window pe extra scrollbar na aaye */
     height: 100%;
     /* pure viewport ke andar lock */
-    max-height: 100vh;
+    max-height: none; /* was 100vh: iframe-relative */
     /* prevent height from growing beyond viewport */
     position: relative;
     box-sizing: border-box;
@@ -35,8 +35,8 @@
 /* Chat Layout */
 .chatLayout {
     display: flex;
-    height: calc(100vh - 200px);
-    max-height: calc(100vh - 200px);
+    height: 560px; /* was calc(100vh-200px): iframe-relative */
+    max-height: 560px; /* was calc(100vh-200px): iframe-relative */
     /* prevent height from growing */
     gap: 0;
     width: 100%;
@@ -671,7 +671,7 @@
 /* Responsive Design - Large Tablet */
 @media (max-width: 1200px) {
     .chatLayout {
-        height: calc(100vh - 220px);
+        height: 540px; /* was calc(100vh-220px): iframe-relative */
     }
 
     .conversationsSidebar {
@@ -695,7 +695,7 @@
     }
 
     .chatLayout {
-        height: calc(100vh - 200px);
+        height: 560px; /* was calc(100vh-200px): iframe-relative */
     }
 
     .conversationsSidebar {
@@ -709,7 +709,7 @@
 @media (max-width: 768px) {
     .pageContainer {
         padding: 0;
-        height: 100vh;
+        height: 560px; /* was 100vh: iframe-relative */
         overflow: hidden;
         position: relative;
     }
@@ -732,7 +732,7 @@
         max-width: 100%;
         min-width: 100%;
         border-right: none;
-        height: 100vh;
+        height: 560px; /* was 100vh: iframe-relative */
         position: absolute;
         top: 0;
         left: 0;
@@ -746,7 +746,7 @@
 
     .chatWindow {
         width: 100%;
-        height: 100vh;
+        height: 560px; /* was 100vh: iframe-relative */
         position: absolute;
         top: 0;
         left: 0;
@@ -919,7 +919,7 @@
 /* Responsive Design - Small Mobile */
 @media (max-width: 576px) {
     .conversationsSidebar {
-        height: 100vh;
+        height: 560px; /* was 100vh: iframe-relative */
     }
 
     .conversationItem {

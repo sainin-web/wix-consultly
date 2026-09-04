@@ -8,6 +8,7 @@ const { corsOptions } = require("./config/corsConfig");
 dotenv.config();
 connectDB();
 const path = require("path");
+const fs = require("fs");
 const app = express();
 
 app.use(cors(corsOptions));
@@ -33,9 +34,30 @@ app.get("/api/our/consultant", (req, res) => {
 
 // Wix Custom Element Script URL — must match the Script URL configured in Wix Studio
 app.get("/consultly-widget.js", (req, res) => {
+  const bundlePath = path.join(__dirname, "public", "consultant-login-bundle.js");
+
+  console.log("\n========== WIDGET SCRIPT REQUEST ==========");
+  console.log("time    :", new Date().toISOString());
+  console.log("origin  :", req.headers.origin || "(none)");
+  console.log("referer :", req.headers.referer || "(none)");
+  console.log("ip      :", req.ip);
+  console.log("ua      :", req.headers["user-agent"] || "(none)");
+  console.log("file    :", bundlePath);
+  console.log("exists  :", fs.existsSync(bundlePath));
+
   res.setHeader("Content-Type", "application/javascript");
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.sendFile(path.join(__dirname, "public", "consultant-login-bundle.js"));
+
+  res.sendFile(bundlePath, (err) => {
+    if (err) {
+      console.error("❌ WIDGET SEND FAILED:", err.message);
+      console.log("==========================================\n");
+      if (!res.headersSent) res.status(500).send("// widget bundle unavailable");
+      return;
+    }
+    console.log("✅ WIDGET SENT OK");
+    console.log("==========================================\n");
+  });
 });
 const {
   resolveWixInstanceFromAuthHeader,

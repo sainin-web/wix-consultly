@@ -431,45 +431,71 @@ class ConsultantLogin extends HTMLElement {
     return false;
   }
 
+  // Which page the iframe should show, based on locally stored consultant login.
+  _resolvePage() {
+    let token = null;
+    let isLoggedIn = null;
+    try {
+      token = localStorage.getItem("token");
+      isLoggedIn = localStorage.getItem("consultant_logged_in");
+    } catch (err) {
+      console.warn("[WIDGET] localStorage unavailable:", err.message);
+    }
+    return token && isLoggedIn === "true" ? "dashboard" : "login";
+  }
+
+  _render(reason) {
+    const page = this._resolvePage();
+    console.log(`[WIDGET] createIframe START (${reason}), page:`, page);
+    try {
+      this.createIframe(page);
+      console.log("[WIDGET] createIframe FINISHED");
+    } catch (err) {
+      console.error("[WIDGET] createIframe FAILED:", err.message, err.stack);
+    }
+  }
+
   async connectedCallback() {
     console.log("[WIDGET] connectedCallback START");
 
+    // ── Step 1: resolve the app instance (required for the storefront) ──
     try {
       const gotInstance = await this.fetchInstance();
-      console.log("[WIDGET] fetchInstance returned:", gotInstance, "instance:", this.instance);
-
-      console.log("[WIDGET] waitForMember START");
-      await this.waitForMember();
-      console.log("[WIDGET] waitForMember END, member:", this.wixMember ? this.wixMember.email : "(guest)");
-
-      if (!this.instance) {
-        console.error("[WIDGET] no Wix instance — iframe will load in guest mode");
-      }
+      console.log("[WIDGET] fetchInstance RESULT:", gotInstance, "instance:", this.instance);
     } catch (err) {
-      console.error("[WIDGET] FATAL ERROR IN connectedCallback:", err.message);
+      console.error("[WIDGET] FATAL ERROR IN fetchInstance:", err.message);
       console.error("[WIDGET] stack:", err.stack);
-    } finally {
-      // Always render. A failure to resolve instance or member must never
-      // leave the element empty and collapsed at 0x0.
-      let token = null;
-      let isLoggedIn = null;
-      try {
-        token = localStorage.getItem("token");
-        isLoggedIn = localStorage.getItem("consultant_logged_in");
-      } catch (err) {
-        console.warn("[WIDGET] localStorage unavailable (sandboxed iframe):", err.message);
-      }
-
-      const page = token && isLoggedIn === "true" ? "dashboard" : "login";
-      console.log("[WIDGET] createIframe START, page:", page);
-      try {
-        this.createIframe(page);
-        console.log("[WIDGET] createIframe SUCCESS");
-      } catch (err) {
-        console.error("[WIDGET] createIframe FAILED:", err.message, err.stack);
-      }
-      console.log("[WIDGET] connectedCallback END");
     }
+
+    if (!this.instance) {
+      console.error(
+        "[WIDGET] ⛔ NO INSTANCE RESOLVED — storefront will be blocked by WixInstanceGuard",
+      );
+    }
+
+    // ── Step 2: render the public storefront NOW ──
+    // Guests must not wait on member lookup. This is the whole point:
+    // instance identification and member identification are separate problems.
+    this._render("initial");
+
+    // ── Step 3: member lookup is optional and must never block Step 2 ──
+    console.log("[WIDGET] waitForMember START (non-blocking)");
+    this.waitForMember()
+      .then(() => {
+        if (this.wixMember) {
+          console.log("[WIDGET] member resolved:", this.wixMember.email, "— re-rendering with member context");
+          this.loaded = false;
+          this.innerHTML = "";
+          this._render("member-upgrade");
+        } else {
+          console.log("[WIDGET] no member (guest) — keeping public storefront");
+        }
+      })
+      .catch((err) => {
+        console.warn("[WIDGET] waitForMember rejected (non-fatal):", err.message);
+      });
+
+    console.log("[WIDGET] connectedCallback END");
   }
 
   async waitForMember() {
@@ -566,7 +592,17 @@ class ConsultantLogin extends HTMLElement {
     this.style.cssText = `display:block; width:100%; min-height:${defaultH}px; position:relative;`;
 
     const params = new URLSearchParams();
-    params.set("instance", this.instance || this.instanceId || "");
+    const resolvedInstance = this.instance || this.instanceId || "";
+
+    console.log("[WIDGET] instance   :", this.instance);
+    console.log("[WIDGET] instanceId :", this.instanceId);
+    if (!resolvedInstance) {
+      console.error(
+        "[WIDGET] ⛔ instance is EMPTY — the iframe URL will have no ?instance= " +
+          "and WixInstanceGuard will show Access Denied.",
+      );
+    }
+    params.set("instance", resolvedInstance);
 
     if (this.wixMember) {
       params.set("wixLoggedIn", "true");
@@ -588,7 +624,8 @@ class ConsultantLogin extends HTMLElement {
         ? `${REACT}/consultant-dashboard?${params.toString()}`
         : `${REACT}/consultant/card?${params.toString()}`;
 
-    console.log("[WIDGET] iframe.src =", iframe.src);
+    console.log("[WIDGET] iframe params:", params.toString());
+    console.log("[WIDGET] iframe URL:", iframe.src);
     iframe.addEventListener("load", () =>
       console.log("[WIDGET] iframe LOADED ok"),
     );

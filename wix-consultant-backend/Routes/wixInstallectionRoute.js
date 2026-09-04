@@ -16,17 +16,25 @@ wixInstallectionRoute.get("/wix/app/install", wix_InstallectionController);
 // Widget calls via fetchWithAuth — Authorization is OAuth access token, not install JWT
 wixInstallectionRoute.get("/wix/get-instance", async (req, res) => {
   try {
+    // Token is masked — never log a full Wix access token.
+    const rawAuth = req.headers.authorization || "";
+    const maskedAuth = rawAuth
+      ? `${rawAuth.slice(0, 12)}…${rawAuth.slice(-6)} (len ${rawAuth.length})`
+      : "(none)";
+
     console.log("\n---------- WIDGET → GET /api/wix/get-instance ----------");
-    console.log("time    :", new Date().toISOString());
-    console.log("origin  :", req.headers.origin || "(none)");
-    console.log("hasAuth :", Boolean(req.headers.authorization));
+    console.log("[WIX INSTANCE] request received");
+    console.log("[WIX INSTANCE] time    :", new Date().toISOString());
+    console.log("[WIX INSTANCE] origin  :", req.headers.origin || "(none)");
+    console.log("[WIX INSTANCE] referer :", req.headers.referer || "(none)");
+    console.log("[WIX INSTANCE] auth    :", maskedAuth);
 
     const result = await resolveWixInstanceFromAuthHeader(
       req.headers.authorization
     );
 
     if (!result.success) {
-      console.error("❌ instance resolve FAILED:", result.error);
+      console.error("[WIX INSTANCE] ❌ resolve FAILED:", result.error);
       console.log("-------------------------------------------------------\n");
       return res.status(result.status || 500).json({
         success: false,
@@ -34,7 +42,8 @@ wixInstallectionRoute.get("/wix/get-instance", async (req, res) => {
       });
     }
 
-    console.log("✅ instanceId:", result.instanceId);
+    console.log("[WIX INSTANCE] ✅ resolved instanceId:", result.instanceId);
+    console.log("[WIX INSTANCE] response sent");
     console.log("-------------------------------------------------------\n");
 
     // Storefront heartbeat for the setup wizard — fire-and-forget, never blocks

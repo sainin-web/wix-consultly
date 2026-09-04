@@ -5,6 +5,9 @@ const WIX_ORIGIN_PATTERNS = [
   /^https:\/\/[^/]+\.wix\.com$/i,
   /^https:\/\/[^/]+\.wixsite\.com$/i,
   /^https:\/\/[^/]+\.wix-dev-sites\.org$/i,
+  // Wix dev-site origins are actually served from "wixdev-sites.org" (no hyphen
+  // between "wix" and "dev"). The hyphenated pattern above never matches them.
+  /^https:\/\/[^/]+\.wixdev-sites\.org$/i,
   /^https:\/\/[^/]+\.wix-development-sites\.org$/i,
   /^https:\/\/[^/]+\.wixstudio\.com$/i,
   /^https:\/\/[^/]+\.wixstudio\.io$/i,

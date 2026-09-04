@@ -19,7 +19,7 @@ app.use((req, res, next) => {
   res.removeHeader("X-Frame-Options");
   res.setHeader(
     "Content-Security-Policy",
-    "frame-ancestors 'self' *.wix.com *.wixsite.com *.wix-dev-sites.org *.wix-development-sites.org *.wixstudio.com *.wixstudio.io"
+    "frame-ancestors 'self' *.wix.com *.wixsite.com *.wix-dev-sites.org *.wixdev-sites.org *.wix-development-sites.org *.wixstudio.com *.wixstudio.io"
   );
   next();
 });
@@ -41,7 +41,7 @@ app.get("/api/consultly-widget.js", (req, res) => {
   console.log("\n========== WIDGET SCRIPT REQUEST ==========");
   console.log("time    :", new Date().toISOString());
   console.log("origin  :", req.headers.origin || "(none)");
-  console.log("referer :", req.headers.referer || "(none)");
+  console.log("refe rer :", req.headers.referer || "(none)");
   console.log("ip      :", req.ip);
   console.log("ua      :", req.headers["user-agent"] || "(none)");
   console.log("file    :", bundlePath);

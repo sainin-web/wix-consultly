@@ -7,16 +7,35 @@ const WixInstanceGuard = ({ children }) => {
 
     useEffect(() => {
         const instanceFromUrl = searchParams.get("instance");
-        const instanceFromStorage = localStorage.getItem("wix_instance");
+
+        // localStorage can throw inside a sandboxed iframe — must not crash the guard.
+        let instanceFromStorage = null;
+        try {
+            instanceFromStorage = localStorage.getItem("wix_instance");
+        } catch (err) {
+            console.warn("[GUARD] localStorage unavailable:", err.message);
+        }
+
         const instance = instanceFromUrl || instanceFromStorage;
+
+        console.log("[GUARD] instance from URL    :", instanceFromUrl || "(none)");
+        console.log("[GUARD] instance from storage:", instanceFromStorage || "(none)");
 
         if (instance) {
             if (instanceFromUrl) {
-                localStorage.setItem("wix_instance", instanceFromUrl);
+                try {
+                    localStorage.setItem("wix_instance", instanceFromUrl);
+                } catch (err) {
+                    console.warn("[GUARD] could not persist instance:", err.message);
+                }
             }
+            console.log("[GUARD] ✅ access allowed");
             setAllowed(true);
         } else {
-            console.warn("⛔ No Wix instance — access blocked");
+            console.warn(
+                "[GUARD] ⛔ No Wix instance — access blocked. " +
+                "The widget did not pass ?instance= in the iframe URL.",
+            );
             setAllowed(false);
         }
     }, []);

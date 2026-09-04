@@ -57,7 +57,11 @@ async function resolveWixInstanceFromAuthHeader(authHeader) {
   if (!bearer) {
     return { error: "Missing authorization", status: 401 };
   }
-  console.log("bearer", bearer);
+  // Masked — never log a complete Wix access token.
+  console.log(
+    "[WIX TOKEN] bearer:",
+    `${bearer.slice(0, 8)}…${bearer.slice(-4)} (len ${bearer.length})`,
+  );
   const fromInstallJwt = decodeInstance(bearer);
   if (fromInstallJwt?.instanceId) {
     return {

@@ -6,35 +6,28 @@ import {
   useBreakpoints,
   Pagination,
   Spinner,
-} from '@shopify/polaris';
-import { useState, useCallback } from 'react';
+  Button,
+} from "@shopify/polaris";
+import { useState, useCallback } from "react";
 
 /**
- * Reusable IndexTableList component
- * @param {Array} itemStrings - Array of tab labels
- * @param {Array} sortOptions - Array of sort options
- * @param {Array} data - Array of data items to display
- * @param {Array} headings - Array of table column headings
- * @param {Function} renderRow - Function to render each row: (item, index) => JSX
- * @param {Object} resourceName - Object with singular and plural resource names
- * @param {String} queryPlaceholder - Placeholder text for search input
- * @param {Function} onTabChange - Optional callback when tab changes: (selectedIndex) => void
- * @param {Function} onQueryChange - Optional callback when query changes: (query) => void
- * @param {Function} onSortChange - Optional callback when sort changes: (sortValue) => void
- * @param {Number} page - Current page number (1-based)
- * @param {Function} setPage - Function to set page number
- * @param {Number} limit - Number of items per page
- * @param {Number} totalItems - Total number of items across all pages
+ * The one admin table. Every list page renders through this so loading,
+ * empty, filter and pagination behaviour is identical everywhere.
+ *
+ * Empty state: pass emptyTitle / emptyDescription / emptyAction, or rely on
+ * the defaults derived from resourceName.
+ * Filters: hidden automatically when there are no tabs and no query handler,
+ * so pages without search never show a dead search bar.
  */
 function IndexTableList({
-  hideFilters = false,
+  hideFilters,
   itemStrings = [],
   sortOptions = [],
   data = [],
   headings = [],
   renderRow,
-  resourceName = { singular: 'item', plural: 'items' },
-  queryPlaceholder = 'Search items',
+  resourceName = { singular: "item", plural: "items" },
+  queryPlaceholder = "Search",
   onTabChange,
   onQueryChange,
   onSortChange,
@@ -44,141 +37,143 @@ function IndexTableList({
   totalItems,
   setType,
   loading,
-  onHandleCancel
+  onHandleCancel,
+  emptyTitle,
+  emptyDescription,
+  emptyAction,
 }) {
   const tabs = itemStrings.map((item, index) => ({
     content: item,
     index,
-    onAction: () => { },
+    onAction: () => {},
     id: `${item}-${index}`,
     isLocked: index === 0,
   }));
 
-
   const [selected, setSelected] = useState(0);
-  const [sortSelected, setSortSelected] = useState(sortOptions.length > 0 ? [sortOptions[0].value] : []);
+  const [sortSelected, setSortSelected] = useState(
+    sortOptions.length > 0 ? [sortOptions[0].value] : [],
+  );
   const { mode, setMode } = useSetIndexFiltersMode();
-  const [queryValue, setQueryValue] = useState('');
+  const [queryValue, setQueryValue] = useState("");
+  const { smDown } = useBreakpoints();
+
+  const showFilters =
+    hideFilters === undefined ? tabs.length > 0 || Boolean(onQueryChange) : !hideFilters;
 
   const handleTabChange = useCallback(
     (selectedIndex) => {
       setSelected(selectedIndex);
-      if (setType) {
-        setType(selectedIndex);
-      }
+      if (setType) setType(selectedIndex);
+      if (onTabChange) onTabChange(selectedIndex);
     },
-    [setType]
+    [setType, onTabChange],
   );
 
   const handleFiltersQueryChange = useCallback(
     (value) => {
       setQueryValue(value);
-      if (onQueryChange) {
-        onQueryChange(value);
-      }
+      if (onQueryChange) onQueryChange(value);
     },
-    [onQueryChange]
+    [onQueryChange],
   );
 
   const handleQueryValueRemove = useCallback(() => {
-    setQueryValue('');
-    if (onQueryChange) {
-      onQueryChange('');
-    }
+    setQueryValue("");
+    if (onQueryChange) onQueryChange("");
   }, [onQueryChange]);
 
   const handleSortChange = useCallback(
     (sortValue) => {
       setSortSelected(sortValue);
-      if (onSortChange) {
-        onSortChange(sortValue);
-      }
+      if (onSortChange) onSortChange(sortValue);
     },
-    [onSortChange]
+    [onSortChange],
   );
 
-
-
   const hasPagination = page !== undefined && setPage !== undefined && limit !== undefined;
-  const totalPages = hasPagination && totalItems !== undefined ? Math.ceil(totalItems / limit) : 1;
+  const totalCount = totalItems !== undefined ? totalItems : data.length;
+  const totalPages = hasPagination ? Math.max(1, Math.ceil(totalCount / limit)) : 1;
   const currentPage = page || 1;
   const startItem = hasPagination ? (currentPage - 1) * limit + 1 : 1;
-  const endItem = hasPagination ? Math.min(currentPage * limit, totalItems || data.length) : data.length;
-  const totalCount = totalItems !== undefined ? totalItems : data.length;
+  const endItem = hasPagination ? Math.min(currentPage * limit, totalCount) : data.length;
 
-  const handlePreviousPage = useCallback(() => {
-    if (currentPage > 1 && setPage) {
-      setPage(currentPage - 1);
-    }
-  }, [currentPage, setPage]);
+  const isEmpty = !loading && data.length === 0;
+  const plural = resourceName.plural || "items";
 
-  const handleNextPage = useCallback(() => {
-    if (currentPage < totalPages && setPage) {
-      setPage(currentPage + 1);
-    }
-  }, [currentPage, totalPages, setPage]);
+  const emptyMarkup = (
+    <div className="saas-empty">
+      <span className="saas-empty-icon" aria-hidden="true">
+        <i className="bi bi-inbox" />
+      </span>
+      <p className="saas-empty-title">{emptyTitle || `No ${plural} found`}</p>
+      <p className="saas-empty-text">
+        {emptyDescription ||
+          (queryValue
+            ? `Nothing matches "${queryValue}". Try a different search.`
+            : `There are currently no ${plural}.`)}
+      </p>
+      {emptyAction && (
+        <div className="saas-empty-action">
+          <Button onClick={emptyAction.onAction}>{emptyAction.content}</Button>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <LegacyCard>
-      <IndexFilters
-        sortOptions={sortOptions}
-        sortSelected={sortSelected}
-        queryValue={queryValue}
-        queryPlaceholder={queryPlaceholder}
-        onQueryChange={handleFiltersQueryChange}
-        onQueryClear={handleQueryValueRemove}
-        onSort={handleSortChange}
-        cancelAction={{
-          onAction: onHandleCancel,
-          disabled: false,
-          loading: false,
-        }}
-        tabs={tabs}
-        selected={selected}
-        onSelect={handleTabChange}
-        canCreateNewView={false}
-        filters={[]}
-        appliedFilters={[]}
-        onClearAll={handleQueryValueRemove}
-        mode={mode}
-        setMode={setMode}
-      />
-      <IndexTable
-        condensed={useBreakpoints().smDown}
-        selectable={false}
-        resourceName={resourceName}
-        itemCount={loading ? 1 : data.length}
-        headings={headings}
-      >
-        {loading ? (
-          <IndexTable.Row>
-            <IndexTable.Cell colSpan={headings.length}>
-              <div
-                style={{
-                  padding: '40px',
-                  display: 'flex',
-                  justifyContent: 'center',
-                }}
-              >
-                <Spinner size="large" />
-              </div>
-            </IndexTable.Cell>
-          </IndexTable.Row>
-        ) : (
-          data.map((item, index) =>
-            renderRow ? renderRow(item, index) : null
-          )
-        )}
-      </IndexTable>
+      {showFilters && (
+        <IndexFilters
+          sortOptions={sortOptions}
+          sortSelected={sortSelected}
+          queryValue={queryValue}
+          queryPlaceholder={queryPlaceholder}
+          onQueryChange={handleFiltersQueryChange}
+          onQueryClear={handleQueryValueRemove}
+          onSort={handleSortChange}
+          cancelAction={{ onAction: onHandleCancel, disabled: false, loading: false }}
+          tabs={tabs}
+          selected={selected}
+          onSelect={handleTabChange}
+          canCreateNewView={false}
+          filters={[]}
+          appliedFilters={[]}
+          onClearAll={handleQueryValueRemove}
+          mode={mode}
+          setMode={setMode}
+        />
+      )}
 
-      {hasPagination && totalPages > 1 && (
-        <div style={{ padding: '16px', display: 'flex', justifyContent: 'center' }}>
+      {loading ? (
+        <div className="saas-loading" role="status">
+          <Spinner size="small" accessibilityLabel="Loading" />
+          <span>Loading {plural}…</span>
+        </div>
+      ) : isEmpty ? (
+        emptyMarkup
+      ) : (
+        <IndexTable
+          condensed={smDown}
+          selectable={false}
+          resourceName={resourceName}
+          itemCount={data.length}
+          headings={headings}
+        >
+          {data.map((item, index) => (renderRow ? renderRow(item, index) : null))}
+        </IndexTable>
+      )}
+
+      {hasPagination && !loading && totalPages > 1 && (
+        <div className="saas-pagination">
+          <span>
+            {startItem}–{endItem} of {totalCount} {plural}
+          </span>
           <Pagination
-            label={`Showing ${startItem} to ${endItem} of ${totalCount} ${resourceName.plural}`}
             hasPrevious={currentPage > 1}
-            onPrevious={handlePreviousPage}
+            onPrevious={() => setPage(currentPage - 1)}
             hasNext={currentPage < totalPages}
-            onNext={handleNextPage}
+            onNext={() => setPage(currentPage + 1)}
           />
         </div>
       )}

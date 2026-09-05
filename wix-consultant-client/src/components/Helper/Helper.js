@@ -54,3 +54,30 @@ export const formatNumber = (value, decimals = 2) => {
     return Number(num.toFixed(decimals));
 };
 
+
+/**
+ * One status → Polaris Badge tone mapping for every admin table.
+ * Uses the status values the backend actually emits.
+ */
+export const statusTone = (status) => {
+    const s = String(status || "").toLowerCase();
+    if (["paid", "success", "completed", "ended", "approved", "credit", "active", "enabled"].includes(s)) return "success";
+    if (["pending", "ongoing", "processing"].includes(s)) return "attention";
+    if (["declined", "failed", "rejected", "cancelled", "debit", "missed", "disabled"].includes(s)) return "critical";
+    return undefined;
+};
+
+/** Sentence-case a backend status token: "manual_credit" -> "Manual credit". */
+export const humanizeStatus = (value) => {
+    if (value === null || value === undefined || value === "" || value === "-") return "-";
+    const s = String(value).replace(/_/g, " ").trim();
+    return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+};
+
+/** Currency prefix + 2dp. Accepts numbers, numeric strings and Decimal128 objects. */
+export const formatCurrency = (currency, value) => {
+    const raw = value && typeof value === "object" && "$numberDecimal" in value ? value.$numberDecimal : value;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return `${currency || ""}0.00`;
+    return `${currency || ""}${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};

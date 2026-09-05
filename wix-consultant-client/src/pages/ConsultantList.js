@@ -1,31 +1,21 @@
-import {
-  Layout,
-  Page,
-  Text,
-  Button,
-  Thumbnail,
-  InlineStack,
-  Box,
-} from "@shopify/polaris";
+import { Layout, Page, Text, Button, InlineStack, IndexTable, Tooltip } from "@shopify/polaris";
 import { PlusIcon, EditIcon, DeleteIcon } from "@shopify/polaris-icons";
 import { useEffect, useState, useCallback, useMemo, Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import IndexTableList from "../components/consultant-list/IndexTableList";
-import { IndexTable } from "@shopify/polaris";
 import { fetchConsultants } from "../components/Redux/slices/ConsultantSlices";
 import { useDispatch, useSelector } from "react-redux";
 import { UserAlert } from "../components/AlertModel/UserAlert";
 import { headings, itemStrings } from "../components/FallbackData/FallbackData";
 import axios from "axios";
-import {
-  fetchAdminDetails,
-  fetchShopAllConsultants,
-} from "../components/Redux/slices/adminSlice";
+import { fetchAdminDetails, fetchShopAllConsultants } from "../components/Redux/slices/adminSlice";
 import { usePolarisToast } from "../components/AlertModel/PolariesTostContext";
+import { formatCurrency } from "../components/Helper/Helper";
+
+const DEFAULT_AVATAR = "/images/flag/teamdefault.png";
 
 function ConsultantList() {
   const dispatch = useDispatch();
-
   const navigate = useNavigate();
   const [selectedTab, setSelectedTab] = useState(0);
   const [queryValue, setQueryValue] = useState("");
@@ -36,62 +26,62 @@ function ConsultantList() {
   const [adminIdLocal, setAdminIdLocal] = useState(null);
   const { showToast } = usePolarisToast();
 
-  const { shopAllConsultants, loading: shopAllConsultantsLoading } =
-    useSelector((state) => state.admin);
-  const { adminDetails_, loading: adminDetailsLoading } = useSelector(
+  const { shopAllConsultants, loading: shopAllConsultantsLoading, adminDetails_ } = useSelector(
     (state) => state.admin,
   );
   const token = localStorage.getItem("wix_access_token") || "";
+  const currency = adminDetails_?.currency || "";
 
   useEffect(() => {
-    const id = localStorage.getItem("wix_id");
-    setAdminIdLocal(id);
+    setAdminIdLocal(localStorage.getItem("wix_id"));
   }, []);
+
   const goToAddConsultant = useCallback(() => {
     navigate(`/admin/consultant-list/add-consultant`);
-  }, []);
+  }, [navigate]);
 
   useEffect(() => {
     if (!adminIdLocal) return;
-    dispatch(fetchShopAllConsultants({ adminIdLocal, token: token }));
+    dispatch(fetchShopAllConsultants({ adminIdLocal, token }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch, isRefreshed, adminIdLocal]);
 
-  const consultantsData = shopAllConsultants?.findConsultant || [];
-  const filteredConsultants = useMemo(() => {
-    if (!consultantsData) return [];
+  useEffect(() => {
+    if (adminIdLocal) dispatch(fetchAdminDetails({ adminIdLocal, token }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminIdLocal]);
 
+  const consultantsData = useMemo(
+    () => shopAllConsultants?.findConsultant || [],
+    [shopAllConsultants],
+  );
+
+  const filteredConsultants = useMemo(() => {
     return consultantsData.filter((consultant) => {
       let matchesTab = true;
-      if (selectedTab !== 0) {
-        const selectedTabLabel = itemStrings[selectedTab].toLowerCase();
-        matchesTab = consultant.type?.toLowerCase() === selectedTabLabel;
+      if (selectedTab !== 0 && itemStrings[selectedTab]) {
+        matchesTab = consultant.type?.toLowerCase() === itemStrings[selectedTab].toLowerCase();
       }
       let matchesQuery = true;
       if (queryValue.trim()) {
-        const query = queryValue.toLowerCase();
+        const q = queryValue.toLowerCase();
         matchesQuery =
-          consultant.name?.toLowerCase().includes(query) ||
-          consultant.email?.toLowerCase().includes(query) ||
-          consultant.contact?.toLowerCase().includes(query) ||
-          consultant.phone?.toLowerCase().includes(query) ||
-          consultant.profession?.toLowerCase().includes(query);
+          consultant.fullname?.toLowerCase().includes(q) ||
+          consultant.name?.toLowerCase().includes(q) ||
+          consultant.email?.toLowerCase().includes(q) ||
+          consultant.phone?.toLowerCase().includes(q) ||
+          consultant.profession?.toLowerCase().includes(q);
       }
-
       return matchesTab && matchesQuery;
     });
-  }, [consultantsData, selectedTab, queryValue, itemStrings]);
+  }, [consultantsData, selectedTab, queryValue]);
 
   const sortedConsultants = useMemo(() => {
-    if (!filteredConsultants.length || !sortValue[0])
-      return filteredConsultants;
-
+    if (!filteredConsultants.length || !sortValue[0]) return filteredConsultants;
     const [field, direction] = sortValue[0].split(" ");
-    const sorted = [...filteredConsultants];
-
-    sorted.sort((a, b) => {
+    return [...filteredConsultants].sort((a, b) => {
       let aValue = a[field];
       let bValue = b[field];
-
       if (field === "experience" || field === "conversionFees") {
         aValue = parseFloat(aValue) || 0;
         bValue = parseFloat(bValue) || 0;
@@ -99,81 +89,55 @@ function ConsultantList() {
         aValue = String(aValue || "").toLowerCase();
         bValue = String(bValue || "").toLowerCase();
       }
-      if (direction === "asc") {
-        return aValue > bValue ? 1 : aValue < bValue ? -1 : 0;
-      } else {
-        return aValue < bValue ? 1 : aValue > bValue ? -1 : 0;
-      }
+      if (direction === "asc") return aValue > bValue ? 1 : aValue < bValue ? -1 : 0;
+      return aValue < bValue ? 1 : aValue > bValue ? -1 : 0;
     });
-
-    return sorted;
   }, [filteredConsultants, sortValue]);
 
-  const handleConsultantClick = useCallback((_id) => {
-    console.log("consultant _id", _id);
-  }, []);
-
   const handleEdit = useCallback(
-    (_id) => {
-      console.log("handleEdit _id", _id);
-      navigate(`/admin/consultant-list/add-consultant?id=${_id}`);
-    },
+    (_id) => navigate(`/admin/consultant-list/add-consultant?id=${_id}`),
     [navigate],
   );
 
-  // Handle delete confirmation
   const handleDeleteClick = useCallback((_id) => {
     setConsultantId(_id);
     setIsUserAlertVisible(true);
   }, []);
 
-  useEffect(() => {
-    if (adminIdLocal) {
-      dispatch(fetchAdminDetails({ adminIdLocal, token: token }));
-    }
-  }, [adminIdLocal]);
-
   const handleToggle = async (id) => {
-    console.log("id ", id);
     try {
       const response = await axios.put(
         `${process.env.REACT_APP_BACKEND_HOST}/api/api-consultant/api-consultant-update-status/${id}`,
         {
           method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         },
       );
       if (response.status === 200) {
         showToast(response.data?.message);
-        dispatch(fetchConsultants({ adminIdLocal, token: token }));
+        dispatch(fetchConsultants({ adminIdLocal, token }));
         setIsRefreshed((prev) => !prev);
       }
     } catch (err) {
-      console.error("Failed to update");
+      showToast("Could not update consultant status", true);
     }
   };
 
   const handleDelete = async () => {
     try {
-      const url = `${process.env.REACT_APP_BACKEND_HOST}/api/api-consultant/delete-consultant/${consultantId}`;
-      const response = await axios.delete(url, {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+      const response = await axios.delete(
+        `${process.env.REACT_APP_BACKEND_HOST}/api/api-consultant/delete-consultant/${consultantId}`,
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         },
-      });
+      );
       if (response.status === 200) {
         setIsUserAlertVisible(false);
         setIsRefreshed((prev) => !prev);
-      } else {
-        console.log("Failed to delete consultant");
       }
     } catch (error) {
-      console.error("Error deleting consultant:", error);
+      showToast("Could not delete consultant", true);
     }
   };
 
@@ -182,164 +146,93 @@ function ConsultantList() {
       const {
         _id,
         fullname,
+        email,
         profession,
-        experience,
         chatPerMinute,
         consultantStatus,
         voicePerMinute,
         videoPerMinute,
+        profileImage,
       } = consultant;
+      const avatar = profileImage
+        ? profileImage.replace(/\\/g, "/").replace(/^http:\/\//i, "https://")
+        : DEFAULT_AVATAR;
+      const rate = (v) => (v ? formatCurrency(currency, v) : "—");
+
       return (
-        <IndexTable.Row _id={_id} key={_id} position={index}>
-          <IndexTable.Cell alignment="start">
-            <Text
-              as="span"
-              alignment="start"
-              variant="bodyMd"
-              fontWeight="bold"
-              numeric
-            >
-              {index + 1}
-            </Text>
-          </IndexTable.Cell>
-          <IndexTable.Cell alignment="center">
-            <InlineStack align="center">
-              <div
-                style={{ width: "40px", height: "40px", objectFit: "cover" }}
-              >
-                <Thumbnail
-                  source={
-                    consultant?.profileImage
-                      ? consultant.profileImage
-                          .replace(/\\/g, "/")
-                          .replace(/^http:\/\//i, "https://")
-                      : "/images/flag/teamdefault.png"
-                  }
-                  fallbackSrc="/images/flag/teamdefault.png"
-                  size="large"
-                />
-              </div>
-            </InlineStack>
-          </IndexTable.Cell>
-          <IndexTable.Cell alignment="center">
-            <Text variant="bodyMd" as="span" alignment="center">
-              {fullname}
-            </Text>
-          </IndexTable.Cell>
+        <IndexTable.Row id={_id} key={_id} position={index}>
           <IndexTable.Cell>
-            <Text variant="bodyMd" as="span" alignment="center">
-              {profession}
-            </Text>
-          </IndexTable.Cell>
-          <IndexTable.Cell>
-            <Text as="span" alignment="center" numeric>
-              <Text variant="bodyMd" as="span" alignment="center">
-                {adminDetails_?.currency}
-                {chatPerMinute || "-"}
-              </Text>
-            </Text>
-          </IndexTable.Cell>
-          <IndexTable.Cell>
-            <Text as="span" alignment="center" numeric>
-              <Text variant="bodyMd" as="span" alignment="center">
-                {adminDetails_?.currency}
-                {voicePerMinute || "-"}
-              </Text>
-            </Text>
-          </IndexTable.Cell>
-          <IndexTable.Cell>
-            <Text as="span" alignment="center" numeric>
-              <Text variant="bodyMd" as="span" alignment="center">
-                {adminDetails_?.currency}
-                {videoPerMinute || "-"}
-              </Text>
-            </Text>
-          </IndexTable.Cell>
-          <IndexTable.Cell>
-            <label
-              onClick={() => handleToggle(_id)}
-              style={{
-                position: "relative",
-                display: "flex",
-                margin: "auto",
-                width: "36px",
-                height: "20px",
-                cursor: "pointer",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={consultantStatus}
-                onChange={() => {}}
-                style={{
-                  opacity: 0,
-                  width: 0,
-                  height: 0,
+            <div className="saas-entity">
+              <img
+                src={avatar}
+                alt=""
+                className="saas-entity-avatar"
+                onError={(e) => {
+                  e.currentTarget.src = DEFAULT_AVATAR;
                 }}
               />
-              <span
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  backgroundColor: consultantStatus
-                    ? "var(--p-color-bg-fill-brand)"
-                    : "var(--p-color-bg-fill-selected)",
-                  borderRadius: "11px",
-                  transition: "background-color 0.2s ease",
-                }}
-              >
-                <span
-                  style={{
-                    position: "absolute",
-                    height: "16px",
-                    width: "16px",
-                    left: consultantStatus ? "18px" : "2px",
-                    top: "2px",
-                    backgroundColor: "#FFFFFF",
-                    borderRadius: "50%",
-                    transition: "left 0.2s ease",
-                    boxShadow: "0 1px 3px rgba(0, 0, 0, 0.2)",
-                  }}
-                />
-              </span>
+              <div style={{ minWidth: 0 }}>
+                <div className="saas-entity-name">{fullname || "—"}</div>
+                {email && <div className="saas-entity-sub">{email}</div>}
+              </div>
+            </div>
+          </IndexTable.Cell>
+          <IndexTable.Cell>
+            <Text as="span" variant="bodyMd">{profession || "—"}</Text>
+          </IndexTable.Cell>
+          <IndexTable.Cell>
+            <Text as="span" variant="bodyMd" numeric>{rate(chatPerMinute)}</Text>
+          </IndexTable.Cell>
+          <IndexTable.Cell>
+            <Text as="span" variant="bodyMd" numeric>{rate(voicePerMinute)}</Text>
+          </IndexTable.Cell>
+          <IndexTable.Cell>
+            <Text as="span" variant="bodyMd" numeric>{rate(videoPerMinute)}</Text>
+          </IndexTable.Cell>
+          <IndexTable.Cell>
+            <label className="saas-switch" onClick={(e) => e.stopPropagation()}>
+              <input
+                type="checkbox"
+                checked={Boolean(consultantStatus)}
+                onChange={() => handleToggle(_id)}
+                aria-label={`${fullname || "Consultant"} is ${consultantStatus ? "active" : "inactive"}`}
+              />
+              <span className="saas-switch-track" aria-hidden="true" />
+              <span>{consultantStatus ? "Active" : "Inactive"}</span>
             </label>
           </IndexTable.Cell>
           <IndexTable.Cell>
-            <InlineStack align="center" gap="100">
-              <Button
-                variant="tertiary"
-                icon={EditIcon}
-                accessibilityLabel="Edit consultant"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleEdit(_id);
-                }}
-              />
-              <Button
-                variant="tertiary"
-                icon={DeleteIcon}
-                tone="critical"
-                accessibilityLabel="Delete consultant"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDeleteClick(_id);
-                }}
-              />
+            <InlineStack align="end" gap="100" wrap={false}>
+              <Tooltip content="Edit">
+                <Button
+                  variant="tertiary"
+                  icon={EditIcon}
+                  accessibilityLabel="Edit consultant"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleEdit(_id);
+                  }}
+                />
+              </Tooltip>
+              <Tooltip content="Delete">
+                <Button
+                  variant="tertiary"
+                  icon={DeleteIcon}
+                  tone="critical"
+                  accessibilityLabel="Delete consultant"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteClick(_id);
+                  }}
+                />
+              </Tooltip>
             </InlineStack>
           </IndexTable.Cell>
         </IndexTable.Row>
       );
     },
-    [
-      handleConsultantClick,
-      handleEdit,
-      handleDeleteClick,
-      isRefreshed,
-      adminDetails_?.currency,
-    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [handleEdit, handleDeleteClick, isRefreshed, currency],
   );
 
   return (
@@ -350,34 +243,32 @@ function ConsultantList() {
         handleDelete={handleDelete}
         consultantId={consultantId}
       />
-      <Box paddingBlockStart="400">
-        <Page
-          title="Consultant List"
-          primaryAction={{
-            icon: PlusIcon,
-            content: "Add Consultant",
-            onAction: goToAddConsultant,
-          }}
-        >
-          <Layout>
-            <Layout.Section>
-              <IndexTableList
-                loading={shopAllConsultantsLoading}
-                itemStrings={itemStrings}
-                sortOptions={[]}
-                data={sortedConsultants}
-                headings={headings}
-                renderRow={renderConsultantRow}
-                resourceName={{ singular: "consultant", plural: "consultants" }}
-                queryPlaceholder="Search consultants"
-                onTabChange={setSelectedTab}
-                onQueryChange={setQueryValue}
-                onSortChange={setSortValue}
-              />
-            </Layout.Section>
-          </Layout>
-        </Page>
-      </Box>
+      <Page
+        title="Consultants"
+        subtitle="Manage the consultants shown on your storefront and their per-minute rates."
+        primaryAction={{ icon: PlusIcon, content: "Add consultant", onAction: goToAddConsultant }}
+      >
+        <Layout>
+          <Layout.Section>
+            <IndexTableList
+              loading={shopAllConsultantsLoading}
+              itemStrings={itemStrings}
+              sortOptions={[]}
+              data={sortedConsultants}
+              headings={headings}
+              renderRow={renderConsultantRow}
+              resourceName={{ singular: "consultant", plural: "consultants" }}
+              queryPlaceholder="Search by name, email or profession"
+              onTabChange={setSelectedTab}
+              onQueryChange={setQueryValue}
+              onSortChange={setSortValue}
+              emptyTitle="No consultants yet"
+              emptyDescription="Consultants will appear here once they are created."
+              emptyAction={{ content: "Add consultant", onAction: goToAddConsultant }}
+            />
+          </Layout.Section>
+        </Layout>
+      </Page>
     </Fragment>
   );
 }

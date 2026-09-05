@@ -17,15 +17,13 @@ export const sortOptions = [
 
 
 export const headings = [
-    { title: 'Sr. No.', alignment: 'start' },
-    { title: 'Image', alignment: 'center' },
-    { title: 'Name', alignment: 'center' },
-    { title: 'Profession', alignment: 'center' },
-    { title: 'Chats', alignment: 'center' },
-    { title: 'Voice Calls', alignment: 'center' },
-    { title: 'Video Calls', alignment: 'center' },
-    { title: 'Status', alignment: 'center' },
-    { title: 'Action', alignment: 'center' },
+    { title: "Consultant" },
+    { title: "Profession" },
+    { title: "Chat / min" },
+    { title: "Audio / min" },
+    { title: "Video / min" },
+    { title: "Status" },
+    { title: "", alignment: "end" },
 ];
 
 export const itemStrings = [
@@ -101,36 +99,4 @@ export const ChatIcon = () => (
     </svg>
 );
 
-export const ITEMS = ({ validation }) => [
-    // {
-    //     id: 0,
-    //     title: "App Status Configuration",
-    //     description:
-    //         "Go to the top of the dashboard page and click the Enable/Disable button to activate or deactivate the consultant management system.",
-    //     complete: validation?.appStatus === true,
-    //     primaryButton: {
-    //         content: "Go to Dashboard",
-    //         props: {
-    //             external: true,
-    //         },
-    //     },
-    // },
-    {
-        id: 1,
-        title: "Add Your First Consultant",
-        description:
-            "Navigate to the Consultant List page and click on 'Add Consultant' button. Fill in all the required details including name, email, contact, profession, experience, and conversion fees.",
-        complete: validation?.consultantCount > 0,
-        primaryButton: {
-            content: "Add Consultant",
-            props: {
-                external: true,
-            },
-        },
-    },
-
-
-
-
-];
 

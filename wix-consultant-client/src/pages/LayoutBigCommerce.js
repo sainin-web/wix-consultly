@@ -1,170 +1,142 @@
-import React, { useState } from "react";
-import { Outlet, NavLink, useLocation } from "react-router-dom";
+import React, { useCallback, useEffect, useState } from "react";
+import { Outlet, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { useDispatch, useSelector } from "react-redux";
+import { Popover, ActionList } from "@shopify/polaris";
 import "bootstrap-icons/font/bootstrap-icons.css";
+import { fetchAdminDetails } from "../components/Redux/slices/adminSlice";
+
+/**
+ * The single admin shell: sidebar + topbar + <Outlet/>.
+ * Styled by src/css/saas-theme.css only. The same sidebar component serves
+ * desktop (collapsible) and mobile (slide-in drawer) — no second navigation.
+ */
 
 const menuSections = [
   {
     heading: "Overview",
     items: [
       { path: "/admin", icon: "bi-grid-1x2", label: "Dashboard", end: true },
-      {
-        path: "/admin/consultant-list",
-        icon: "bi-people",
-        label: "Consulty List",
-      },
+      { path: "/admin/consultant-list", icon: "bi-people", label: "Consultants" },
       { path: "/admin/history", icon: "bi-clock-history", label: "History" },
     ],
   },
   {
     heading: "Finance",
     items: [
-      {
-        path: "/admin/wallet-management",
-        icon: "bi-wallet2",
-        label: "Wallet Management",
-      },
-      {
-        path: "/admin/withdrawal-request",
-        icon: "bi-cash-stack",
-        label: "Withdrawal Request",
-      },
-      {
-        path: "/admin/voucher-management",
-        icon: "bi-ticket-perforated",
-        label: "Voucher Management",
-      },
-      {
-        path: "/admin/admin-percentage",
-        icon: "bi-percent",
-        label: "Admin Charges",
-      },
-      {
-        path: "/admin/revenue-management",
-        icon: "bi-graph-up-arrow",
-        label: "Revenue Management",
-      },
+      { path: "/admin/wallet-management", icon: "bi-wallet2", label: "Wallet Management" },
+      { path: "/admin/withdrawal-request", icon: "bi-cash-stack", label: "Withdrawal Requests" },
+      { path: "/admin/voucher-management", icon: "bi-ticket-perforated", label: "Voucher Management" },
+      { path: "/admin/admin-percentage", icon: "bi-percent", label: "Admin Charges" },
+      { path: "/admin/revenue-management", icon: "bi-graph-up-arrow", label: "Revenue" },
     ],
   },
   {
     heading: "Settings",
     items: [
-      {
-        path: "/admin/account-information",
-        icon: "bi-person-gear",
-        label: "Account Information",
-      },
+      { path: "/admin/account-information", icon: "bi-person-gear", label: "Account" },
       { path: "/admin/faq", icon: "bi-question-circle", label: "FAQ" },
     ],
   },
 ];
 
-// Flat list used to resolve the current page title for the topbar
-const allMenuItems = menuSections.flatMap((s) => s.items);
+function findSection(pathname) {
+  for (const section of menuSections) {
+    for (const item of section.items) {
+      const match = item.end ? pathname === item.path : pathname.startsWith(item.path);
+      if (match) return section.heading;
+    }
+  }
+  return menuSections[0].heading;
+}
 
 const LayoutBigCommerce = () => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+  const dispatch = useDispatch();
+  const { adminDetails_ } = useSelector((state) => state.admin);
 
-  const currentItem =
-    allMenuItems.find(
-      (item) =>
-        item.path !== "/admin" && location.pathname.startsWith(item.path),
-    ) || allMenuItems[0];
+  // Admin identity for the topbar. Pages fetch this too; only fetch here when
+  // nothing has loaded it yet so the shell never issues a duplicate request.
+  useEffect(() => {
+    if (adminDetails_) return;
+    const adminIdLocal = localStorage.getItem("wix_id");
+    const token = localStorage.getItem("wix_access_token") || "";
+    if (adminIdLocal) dispatch(fetchAdminDetails({ adminIdLocal, token }));
+  }, [adminDetails_, dispatch]);
 
-  const handleDesktopSidebarToggle = () => {
-    const isMobile = window.innerWidth < 992;
+  const adminName = adminDetails_?.shop_Domain || "Store admin";
+  const adminInitial = adminName.trim().charAt(0).toUpperCase() || "A";
+  const sectionLabel = findSection(location.pathname);
 
-    if (isMobile) {
-      setIsMobileMenuOpen((prev) => !prev);
-    } else {
-      setIsSidebarCollapsed((prev) => !prev);
-    }
-  };
+  const handleSidebarToggle = useCallback(() => {
+    if (window.innerWidth < 992) setIsMobileMenuOpen((prev) => !prev);
+    else setIsSidebarCollapsed((prev) => !prev);
+  }, []);
 
-  const closeMobileMenu = () => {
+  const closeMobileMenu = useCallback(() => {
     if (window.innerWidth < 992) setIsMobileMenuOpen(false);
+  }, []);
+
+  const go = (path) => {
+    setMenuOpen(false);
+    navigate(path);
   };
 
   return (
     <div
-      className={`d-flex dashboard-frame-root${
-        isSidebarCollapsed ? " dashboard-frame-root--collapsed" : ""
-      }`}
+      className={`dashboard-frame-root${isSidebarCollapsed ? " dashboard-frame-root--collapsed" : ""}`}
     >
-      {/* Mobile open button (shown when drawer is hidden) */}
       {!isMobileMenuOpen && (
         <button
           type="button"
           className="dashboard-mobile-toggle-btn d-lg-none"
-          aria-label="Open sidebar"
-          onClick={handleDesktopSidebarToggle}
+          aria-label="Open navigation"
+          onClick={handleSidebarToggle}
         >
           <i className="bi bi-list" />
         </button>
       )}
 
-      {/* Mobile backdrop */}
       {isMobileMenuOpen && (
-        <div
-          className="saas-mobile-backdrop d-lg-none"
-          onClick={closeMobileMenu}
-          aria-hidden="true"
-        />
+        <div className="saas-mobile-backdrop d-lg-none" onClick={closeMobileMenu} aria-hidden="true" />
       )}
 
-      {/* Sidebar */}
       <aside
-        className={`d-flex flex-column flex-shrink-0 dashboard-sidebar${
-          isSidebarCollapsed ? " dashboard-sidebar--collapsed" : ""
-        }${isMobileMenuOpen ? " dashboard-sidebar--mobile-open" : ""}`}
+        className={`dashboard-sidebar${isSidebarCollapsed ? " dashboard-sidebar--collapsed" : ""}${
+          isMobileMenuOpen ? " dashboard-sidebar--mobile-open" : ""
+        }`}
       >
-        {/* Brand + toggle */}
         <div className="dashboard-sidebar-branding">
-          <div className="d-flex align-items-center justify-content-between gap-2">
-            <div className="d-flex align-items-center gap-2">
-              <span className="dashboard-sidebar-logo">
-                <i className="bi bi-stars" />
-              </span>
-              <span className="dashboard-sidebar-logo-text">Consulty</span>
-            </div>
-            <button
-              type="button"
-              className="dashboard-sidebar-toggle"
-              aria-label="Toggle sidebar"
-              onClick={handleDesktopSidebarToggle}
-            >
-              <i
-                className={`bi ${
-                  isSidebarCollapsed ? "bi-chevron-right" : "bi-chevron-left"
-                }`}
-              />
-            </button>
+          <div className="saas-brand">
+            <span className="dashboard-sidebar-logo" aria-hidden="true">
+              <i className="bi bi-chat-square-text-fill" />
+            </span>
+            <span className="dashboard-sidebar-logo-text">Consultly</span>
           </div>
-          <div className="saas-workspace-label">
-            <span className="saas-workspace-name">Admin Workspace</span>
-            <span className="saas-env-badge">Live</span>
-          </div>
+          <button
+            type="button"
+            className="dashboard-sidebar-toggle"
+            aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            onClick={handleSidebarToggle}
+          >
+            <i className={`bi ${isSidebarCollapsed ? "bi-chevron-right" : "bi-chevron-left"}`} />
+          </button>
         </div>
 
-        {/* Navigation */}
         <nav className="saas-sidebar-scroll" aria-label="Admin navigation">
           {menuSections.map((section) => (
             <div className="saas-nav-section" key={section.heading}>
               <p className="saas-nav-heading">{section.heading}</p>
-              <ul
-                className={`nav flex-column dashboard-sidebar-nav${
-                  isMobileMenuOpen ? " is-open" : ""
-                }`}
-              >
+              <ul className="dashboard-sidebar-nav">
                 {section.items.map((item) => (
-                  <li className="nav-item" key={item.label}>
+                  <li key={item.path}>
                     <NavLink
                       to={item.path}
                       end={item.end}
-                      className={({ isActive }) =>
-                        `nav-link${isActive ? " active" : ""}`
-                      }
+                      className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
                       title={isSidebarCollapsed ? item.label : undefined}
                       onClick={closeMobileMenu}
                     >
@@ -172,7 +144,6 @@ const LayoutBigCommerce = () => {
                         <i className={`bi ${item.icon}`} />
                       </span>
                       <span className="saas-nav-label">{item.label}</span>
-                      <span className="saas-nav-indicator" aria-hidden="true" />
                     </NavLink>
                   </li>
                 ))}
@@ -180,56 +151,48 @@ const LayoutBigCommerce = () => {
             </div>
           ))}
         </nav>
-
-      
       </aside>
 
-      {/* Main content area */}
-      <div className="flex-grow-1 d-flex flex-column dashboard-main-wrap">
-        {/* Topbar */}
+      <div className="dashboard-main-wrap">
         <header className="saas-topbar">
-          <div className="saas-topbar-left">
-            <p className="saas-topbar-breadcrumb">
-              <span className="saas-topbar-crumb-root">Admin</span>
-              <i className="bi bi-chevron-right" />
-              <span className="saas-topbar-crumb-current">
-                {currentItem.label}
-              </span>
-            </p>
-          </div>
-
-          <div className="saas-topbar-search" role="search">
-            <i className="bi bi-search" aria-hidden="true" />
-            <input
-              type="search"
-              placeholder="Search anything…"
-              aria-label="Search"
-            />
-            <span className="saas-topbar-kbd" aria-hidden="true">
-              ⌘K
-            </span>
-          </div>
+          <p className="saas-topbar-breadcrumb">
+            <span>Admin</span>
+            <i className="bi bi-chevron-right" aria-hidden="true" />
+            <span className="saas-topbar-crumb-current">{sectionLabel}</span>
+          </p>
 
           <div className="saas-topbar-right">
-            <button
-              type="button"
-              className="saas-topbar-icon-btn"
-              aria-label="Notifications"
+            <Popover
+              active={menuOpen}
+              onClose={() => setMenuOpen(false)}
+              preferredAlignment="right"
+              activator={
+                <button
+                  type="button"
+                  className="saas-admin-btn"
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpen}
+                  onClick={() => setMenuOpen((v) => !v)}
+                >
+                  <span className="saas-topbar-avatar" aria-hidden="true">
+                    {adminInitial}
+                  </span>
+                  <span className="saas-admin-meta">
+                    <span className="saas-admin-name">{adminName}</span>
+                    <span className="saas-admin-role">Store owner</span>
+                  </span>
+                  <i className="bi bi-chevron-down" aria-hidden="true" />
+                </button>
+              }
             >
-              <i className="bi bi-bell" />
-              <span className="saas-topbar-dot" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="saas-topbar-icon-btn"
-              aria-label="Help"
-            >
-              <i className="bi bi-question-circle" />
-            </button>
-            <span className="saas-topbar-divider" aria-hidden="true" />
-            <span className="saas-topbar-avatar" aria-label="Admin profile">
-              A
-            </span>
+              <ActionList
+                actionRole="menuitem"
+                items={[
+                  { content: "Account information", onAction: () => go("/admin/account-information") },
+                  { content: "Help & FAQ", onAction: () => go("/admin/faq") },
+                ]}
+              />
+            </Popover>
           </div>
         </header>
 

@@ -308,7 +308,7 @@ function Faq() {
   ];
 
   return (
-    <Page title="Faq">
+    <Page title="FAQ" subtitle="Answers to common questions about running Consultly.">
       <Layout>
         <Layout.Section>
           <Card padding="0">

@@ -1,192 +1,142 @@
-import React, { Fragment, useCallback, useEffect, useState } from 'react'
-import IndexTableList from '../components/consultant-list/IndexTableList'
-import { Page, Layout } from '@shopify/polaris'
-import { IndexTable, Text } from '@shopify/polaris'
-import { fetchActivityHistory ,fetchAdminDetails} from '../components/Redux/slices/adminSlice'
-import { useDispatch, useSelector } from 'react-redux'
-import { formatNumber } from '../components/Helper/Helper'
+import React, { Fragment, useCallback, useEffect, useState } from "react";
+import IndexTableList from "../components/consultant-list/IndexTableList";
+import { Page, Layout, IndexTable, Text, Badge } from "@shopify/polaris";
+import { fetchActivityHistory, fetchAdminDetails } from "../components/Redux/slices/adminSlice";
+import { useDispatch, useSelector } from "react-redux";
+import { formatCurrency, getDuration, humanizeStatus, statusTone } from "../components/Helper/Helper";
 
+const headings = [
+  { title: "Client" },
+  { title: "Consultant" },
+  { title: "Type" },
+  { title: "Date" },
+  { title: "Duration" },
+  { title: "Amount" },
+  { title: "Status" },
+];
 
+const tabs = ["All", "Chat", "Voice Call", "Video Call"];
 
-const transactionHeadings = [
-    { title: 'Sr. No.', alignment: 'start' },
-    { title: 'User', alignment: 'center' },
-    { title: 'Consultant', alignment: 'center' },
-    { title: 'Date', alignment: 'center' },
-    { title: 'Time', alignment: 'center' },
-    { title: 'Type', alignment: 'center' },
-    { title: 'Duration', alignment: 'center' },
-    { title: 'Amount', alignment: 'center' },
-    { title: 'Status', alignment: 'center' }
-]
-
-const transactionItemStrings = ['All', 'Chat', 'Voice Call', 'Video Call',]
+const TYPE_LABEL = { chat: "Chat", voice: "Audio", video: "Video" };
 
 function UserTransHistory() {
-    const { activityHistory, loading } = useSelector((state) => state.admin);
-    const { adminDetails_, loading: adminDetailsLoading } = useSelector((state) => state.admin);
+  const { activityHistory, loading, adminDetails_ } = useSelector((state) => state.admin);
+  const dispatch = useDispatch();
+  const [adminIdLocal, setAdminIdLocal] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [type, setType] = useState(0);
+  const limit = 10;
+  const currency = adminDetails_?.currency || "";
 
-    const dispatch = useDispatch();
-    const [adminIdLocal, setAdminIdLocal] = useState(null);
-    const [searchQuery, setSearchQuery] = useState("");
-    const [page, setPage] = useState(1);
-    const [type, setType] = useState(0);
-    const limit = 10;
+  useEffect(() => {
+    setAdminIdLocal(localStorage.getItem("wix_id"));
+  }, []);
 
-    useEffect(() => {
-        const id = localStorage.getItem('wix_id');
-        setAdminIdLocal(id);
-    }, []);
-    useEffect(()=> {
-        if(adminIdLocal){
-            dispatch(fetchAdminDetails({adminIdLocal}))
-        }
-    },[dispatch, adminIdLocal, page, limit, type,])
-    useEffect(() => {
-        if (adminIdLocal) {
-            dispatch(fetchActivityHistory({ adminIdLocal, page, limit, type, searchQuery }));
-        }
-    }, [dispatch, adminIdLocal, page, limit, type, searchQuery]);
+  useEffect(() => {
+    if (adminIdLocal) dispatch(fetchAdminDetails({ adminIdLocal }));
+  }, [dispatch, adminIdLocal]);
 
-  
+  useEffect(() => {
+    if (adminIdLocal) {
+      dispatch(fetchActivityHistory({ adminIdLocal, page, limit, type, searchQuery }));
+    }
+  }, [dispatch, adminIdLocal, page, limit, type, searchQuery]);
 
-    const formatDate = (iso) =>
-        new Date(iso).toLocaleDateString();
+  const formatDateTime = (iso) =>
+    iso
+      ? new Date(iso).toLocaleString(undefined, {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : "—";
 
-    const formatTime = (iso) =>
-        new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const onHandleCancel = () => {
+    setPage(1);
+    setSearchQuery("");
+    setType(0);
+    return true;
+  };
 
-    const getDuration = (start, end) => {
-        if (!start || !end) return "00:00";   
-        const diffMs = new Date(end) - new Date(start);
-        if (diffMs <= 0) return "00:00";   
-        const diff = Math.floor(diffMs / 1000);
-        const m = String(Math.floor(diff / 60)).padStart(2, '0');
-        const s = String(diff % 60).padStart(2, '0');
-        return `${m}:${s}`;
-    };
-    const onHandleCancel = () => {
-        setPage(1);
-        setSearchQuery("");
-        setType(0);
-        return true;
-    };
-
-
-    const tableData = activityHistory?.data?.map((item) => ({
-        id: item._id,
-        type: item.type?.toUpperCase(),
-        date: formatDate(item.createdAt),
-        time: formatTime(item.startTime),
-        duration: getDuration(item.startTime, item.endTime),
-        user: item.senderId?.fullname,
-        consultant: item.receiverId?.fullname,
-        amount: `${item.amount}`,
-        status: item.status
+  const tableData =
+    activityHistory?.data?.map((item) => ({
+      id: item._id,
+      type: item.type,
+      when: formatDateTime(item.createdAt),
+      duration: item.startTime && item.endTime ? `${getDuration(item.startTime, item.endTime)} min` : "—",
+      user: item.senderId?.fullname || "—",
+      consultant: item.receiverId?.fullname || "—",
+      amount: item.amount,
+      status: item.status,
     })) || [];
-    
-    const renderTransactionRow = useCallback((transaction, index) => {
-        const { id, user, type, date, time, duration, consultant, amount, status } = transaction
-        const serialNumber = (page - 1) * limit + index + 1;
 
-        return (
+  const renderRow = useCallback(
+    (row, index) => (
+      <IndexTable.Row id={row.id} key={row.id} position={index}>
+        <IndexTable.Cell>
+          <Text as="span" variant="bodyMd" fontWeight="semibold">{row.user}</Text>
+        </IndexTable.Cell>
+        <IndexTable.Cell>
+          <Text as="span" variant="bodyMd">{row.consultant}</Text>
+        </IndexTable.Cell>
+        <IndexTable.Cell>
+          <Text as="span" variant="bodyMd">{TYPE_LABEL[row.type] || humanizeStatus(row.type)}</Text>
+        </IndexTable.Cell>
+        <IndexTable.Cell>
+          <Text as="span" variant="bodyMd">{row.when}</Text>
+        </IndexTable.Cell>
+        <IndexTable.Cell>
+          <Text as="span" variant="bodyMd" numeric>{row.duration}</Text>
+        </IndexTable.Cell>
+        <IndexTable.Cell>
+          <Text as="span" numeric fontWeight="semibold">{formatCurrency(currency, row.amount)}</Text>
+        </IndexTable.Cell>
+        <IndexTable.Cell>
+          <Badge tone={statusTone(row.status)}>{humanizeStatus(row.status)}</Badge>
+        </IndexTable.Cell>
+      </IndexTable.Row>
+    ),
+    [currency],
+  );
 
-            <IndexTable.Row id={id} key={id} position={index}>
-                <IndexTable.Cell>
-                    <Text as="span" alignment="start" variant="bodyMd" fontWeight="bold" numeric>
-                        {serialNumber}
-                    </Text>
-                </IndexTable.Cell>
-                <IndexTable.Cell>
-                    <Text variant="bodyMd" as="span" alignment="center">
-                        {user}
-                    </Text>
-                </IndexTable.Cell>
-                <IndexTable.Cell>
-                    <Text variant="bodyMd" as="span" alignment="center">
-                        {consultant}
-                    </Text>
-                </IndexTable.Cell>
-                <IndexTable.Cell>
-                    <Text variant="bodyMd" as="span" alignment="center">
-                        {date}
-                    </Text>
-                </IndexTable.Cell>
-                <IndexTable.Cell>
-                    <Text variant="bodyMd" as="span" alignment="center">
-                        {time}
-                    </Text>
-                </IndexTable.Cell>
-                <IndexTable.Cell>
-
-                    <div style={{ textTransform: 'lowercase' }}>
-                        <Text variant="bodyMd" as="span" alignment="center">
-                            {type.charAt(0).toUpperCase() + type.slice(1)}
-                        </Text>
-                    </div>
-                </IndexTable.Cell>
-
-
-                <IndexTable.Cell>
-                    <Text variant="bodyMd" as="span" alignment="center">
-                        {duration}
-                    </Text>
-                </IndexTable.Cell>
-
-
-                <IndexTable.Cell>
-                    <Text as="span" alignment="center" numeric>
-                    {adminDetails_?.currency}{formatNumber(amount, 2)}
-                    </Text>
-                </IndexTable.Cell>
-                <IndexTable.Cell>
-                    <div style={{ color: status === "active" ? "green" : "black" }}>
-                        <Text variant="bodyMd" as="span" alignment="center">
-                            {status}
-                        </Text>
-                    </div>
-                </IndexTable.Cell>
-            </IndexTable.Row >
-        )
-    }, [page, limit,adminDetails_?.currency])
-
-    return (
-        <Fragment>
-
-
-            <Page
-                title="Activity History"
-
-            >
-                <Layout>
-                    <Layout.Section>
-                        <IndexTableList
-                            itemStrings={transactionItemStrings}
-                            sortOptions={[]}
-                            data={tableData}
-                            headings={transactionHeadings}
-                            renderRow={renderTransactionRow}
-                            resourceName={{ singular: 'transaction', plural: 'transactions' }}
-                            queryPlaceholder="Search transactions"
-                            onTabChange={() => { }}
-                            onHandleCancel={onHandleCancel}
-                            onQueryChange={(value) => {
-                                setSearchQuery(value);
-                                setPage(1);
-                            }}
-                            onSortChange={() => { }}
-                            page={page}
-                            setPage={setPage}
-                            setType={setType}
-                            limit={limit}
-                            totalItems={activityHistory?.totalItems || activityHistory?.data?.length || 0}
-                            loading={loading}
-                        />
-                    </Layout.Section>
-                </Layout>
-            </Page>
-        </Fragment>
-    )
+  return (
+    <Fragment>
+      <Page title="History" subtitle="Every chat, audio and video consultation on your site.">
+        <Layout>
+          <Layout.Section>
+            <IndexTableList
+              itemStrings={tabs}
+              sortOptions={[]}
+              data={tableData}
+              headings={headings}
+              renderRow={renderRow}
+              resourceName={{ singular: "consultation", plural: "consultations" }}
+              queryPlaceholder="Search by client or consultant"
+              onHandleCancel={onHandleCancel}
+              onQueryChange={(value) => {
+                setSearchQuery(value);
+                setPage(1);
+              }}
+              page={page}
+              setPage={setPage}
+              setType={(value) => {
+                setType(value);
+                setPage(1);
+              }}
+              limit={limit}
+              totalItems={activityHistory?.totalItems || activityHistory?.data?.length || 0}
+              loading={loading}
+              emptyTitle="No consultations yet"
+              emptyDescription="Sessions will appear here once customers start consulting."
+            />
+          </Layout.Section>
+        </Layout>
+      </Page>
+    </Fragment>
+  );
 }
 
-export default UserTransHistory
+export default UserTransHistory;

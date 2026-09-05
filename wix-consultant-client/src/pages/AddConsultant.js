@@ -562,7 +562,7 @@ function AddConsultant() {
     return (
       <div
         style={{
-          height: "100vh",
+          padding: "64px 0",
           display: "flex",
           justifyContent: "center",
           alignItems: "center",
@@ -578,21 +578,14 @@ function AddConsultant() {
       <Box paddingBlockStart="400">
         <Page
           marginBlockStart="400"
-          backAction={{
-            disabled: true,
-            content: "Consultant List",
-            onAction: goToAddConsultant,
-          }}
-          title={
-            updateIsTrue
-              ? "Update Consultant settings"
-              : "Add Consultant settings"
-          }
+          backAction={{ content: "Consultants", onAction: goToAddConsultant }}
+          title={updateIsTrue ? "Edit consultant" : "Add consultant"}
+          subtitle="Profile, rates and availability shown on your storefront."
         >
 
           <Layout>
             <Layout.Section>
-              <LegacyCard title="Add Consultant settings" sectioned>
+              <LegacyCard title={updateIsTrue ? "Consultant details" : "New consultant"} sectioned>
                 <FormLayout>
                   <FormLayout.Group>
                     <Grid>
@@ -953,14 +946,10 @@ function AddConsultant() {
                     />
                   </FormLayout.Group>
                 </FormLayout>
-                <div
-                  style={{
-                    marginTop: "20px",
-                    display: "flex",
-                    gap: "10px",
-                    justifyContent: "flex-end",
-                  }}
-                >
+                <div className="saas-form-actions">
+                  <Button onClick={goToAddConsultant} disabled={isSubmitting}>
+                    Cancel
+                  </Button>
                   {updateIsTrue ? (
                     <Button
                       variant="primary"

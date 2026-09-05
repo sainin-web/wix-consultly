@@ -1,12 +1,5 @@
 import React, { Fragment, useState, useCallback, useEffect } from "react";
-import {
-  Page,
-  Layout,
-  IndexTable,
-  Text,
-  Button,
-  InlineStack,
-} from "@shopify/polaris";
+import { Page, Layout, IndexTable, Text, Button, InlineStack, Tooltip, Badge } from "@shopify/polaris";
 import IndexTableList from "../components/consultant-list/IndexTableList";
 import { DeleteIcon, EditIcon, PlusIcon } from "@shopify/polaris-icons";
 import { useDispatch, useSelector } from "react-redux";
@@ -15,21 +8,23 @@ import { VoucherDeleteAlert } from "../components/AlertModel/VoucherDeleteAlert"
 import axios from "axios";
 import { getWixAdminToken } from "../utils/getWixAdminToken";
 import { useNavigate } from "react-router-dom";
+import { formatCurrency } from "../components/Helper/Helper";
+
+const headings = [
+  { title: "Voucher" },
+  { title: "Credits" },
+  { title: "Bonus credits" },
+  { title: "Customer receives" },
+  { title: "Status" },
+  { title: "", alignment: "end" },
+];
 
 function VoucherTable() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const [data, setData] = useState([]);
-  // useState returns [state, setState] — assign only the first element, or use a plain array.
-  const headings = [
-    { title: "Sr. No.", alignment: "start" },
-    { title: "Voucher Code", alignment: "center" },
-    { title: "Total Amount", alignment: "center" },
-    { title: "Extra Amount", alignment: "center" },
-    { title: "Action", alignment: "center" },
-  ];
   const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(10);
+  const [limit] = useState(10);
   const [totalItems, setTotalItems] = useState(0);
   const [adminIdLocal, setAdminIdLocal] = useState(null);
   const [appToken, setAppToken] = useState(null);
@@ -37,42 +32,34 @@ function VoucherTable() {
   const [voucherId, setVoucherId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [reLoadApi, setReLoadApi] = useState(false);
-  const { adminDetails_, loading: adminDetailsLoading } = useSelector(
-    (state) => state.admin,
-  );
+  const { adminDetails_, loading: adminDetailsLoading } = useSelector((state) => state.admin);
+  const currency = adminDetails_?.currency || "";
+
   useEffect(() => {
-    const id = localStorage.getItem("wix_id");
-    setAdminIdLocal(id);
-    const appToken = localStorage.getItem("appToken");
-    setAppToken(appToken);
+    setAdminIdLocal(localStorage.getItem("wix_id"));
+    setAppToken(localStorage.getItem("appToken"));
   }, []);
 
   useEffect(() => {
-    if (adminIdLocal) {
-      dispatch(fetchAdminDetails({ adminIdLocal, appToken }));
-    }
+    if (adminIdLocal) dispatch(fetchAdminDetails({ adminIdLocal, appToken }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch, adminIdLocal, reLoadApi]);
 
   useEffect(() => {
-    if (
-      adminDetails_ &&
-      adminDetails_.vouchers &&
-      Array.isArray(adminDetails_.vouchers)
-    ) {
-      const mappedVouchers = adminDetails_?.vouchers?.map((voucher, index) => ({
+    if (Array.isArray(adminDetails_?.vouchers)) {
+      const mapped = adminDetails_.vouchers.map((voucher, index) => ({
         id: voucher._id || voucher.id || index + 1,
-        voucherCode:
-          voucher.voucherCode || `VCH${String(index + 1).padStart(3, "0")}`,
+        voucherCode: voucher.voucherCode || `VCH${String(index + 1).padStart(3, "0")}`,
         totalCoin: voucher.totalCoin?.$numberDecimal
           ? parseFloat(voucher.totalCoin.$numberDecimal)
-          : voucher.totalCoin || 0,
+          : Number(voucher.totalCoin) || 0,
         extraCoin: voucher.extraCoin?.$numberDecimal
           ? parseFloat(voucher.extraCoin.$numberDecimal)
-          : voucher.extraCoin || 0,
+          : Number(voucher.extraCoin) || 0,
         status: voucher.status || "Active",
       }));
-      setData(mappedVouchers);
-      setTotalItems(mappedVouchers.length);
+      setData(mapped);
+      setTotalItems(mapped.length);
     }
   }, [adminDetails_]);
 
@@ -87,18 +74,12 @@ function VoucherTable() {
     try {
       const response = await axios.delete(
         `${process.env.REACT_APP_BACKEND_HOST}/api/admin/delete/voucher/${adminIdLocal}/${id}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
+        { headers: { Authorization: `Bearer ${token}` } },
       );
       if (response.status === 200) {
         setReLoadApi((prev) => !prev);
         setIsUserAlertVisible(false);
         setVoucherId(null);
-        setLoading(false);
-      } else {
       }
     } catch (error) {
       console.error("Error deleting voucher:", error);
@@ -106,72 +87,70 @@ function VoucherTable() {
       setLoading(false);
     }
   };
-  const goToAddVoucher = () => {
-    navigate(`/admin/voucher-management/voucher`);
-  };
+
+  const goToAddVoucher = () => navigate(`/admin/voucher-management/voucher`);
+
+  // Edit reuses the existing settings route, which already reads
+  // id / totalCoin / extraCoin from the query string.
+  const goToEditVoucher = (voucher) =>
+    navigate(
+      `/admin/voucher-management/voucher?id=${voucher.id}&totalCoin=${voucher.totalCoin}&extraCoin=${voucher.extraCoin}`,
+    );
 
   const renderVoucherRow = useCallback(
     (voucher, index) => {
       const { id, voucherCode, totalCoin, extraCoin, status } = voucher;
-
       return (
         <IndexTable.Row id={id} key={id || index} position={index}>
           <IndexTable.Cell>
-            <Text
-              as="span"
-              alignment="start"
-              variant="bodyMd"
-              fontWeight="bold"
-              numeric
-            >
-              {index + 1}
+            <Text as="span" variant="bodyMd" fontWeight="semibold">{voucherCode}</Text>
+          </IndexTable.Cell>
+          <IndexTable.Cell>
+            <Text as="span" numeric>{formatCurrency(currency, totalCoin)}</Text>
+          </IndexTable.Cell>
+          <IndexTable.Cell>
+            <Text as="span" numeric>{extraCoin ? formatCurrency(currency, extraCoin) : "—"}</Text>
+          </IndexTable.Cell>
+          <IndexTable.Cell>
+            <Text as="span" numeric fontWeight="semibold">
+              {formatCurrency(currency, totalCoin + extraCoin)}
             </Text>
           </IndexTable.Cell>
           <IndexTable.Cell>
-            <Text variant="bodyMd" as="span" alignment="center">
-              {voucherCode || "N/A"}
-            </Text>
+            <Badge tone="success">{status}</Badge>
           </IndexTable.Cell>
           <IndexTable.Cell>
-            <Text as="span" alignment="center" numeric>
-              {adminDetails_?.currency}
-              {totalCoin}
-            </Text>
-          </IndexTable.Cell>
-          <IndexTable.Cell>
-            <Text as="span" alignment="center" numeric>
-              {adminDetails_?.currency}
-              {extraCoin}
-            </Text>
-          </IndexTable.Cell>
-
-          <IndexTable.Cell>
-            <InlineStack align="center" gap="100">
-              <Button
-                variant="tertiary"
-                icon={EditIcon}
-                accessibilityLabel="Edit voucher"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  // goToVoucherSettings(id);
-                }}
-              />
-              <Button
-                variant="tertiary"
-                icon={DeleteIcon}
-                tone="critical"
-                accessibilityLabel="Delete voucher"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleOpenDeleteModal(id);
-                }}
-              />
+            <InlineStack align="end" gap="100" wrap={false}>
+              <Tooltip content="Edit">
+                <Button
+                  variant="tertiary"
+                  icon={EditIcon}
+                  accessibilityLabel="Edit voucher"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    goToEditVoucher(voucher);
+                  }}
+                />
+              </Tooltip>
+              <Tooltip content="Delete">
+                <Button
+                  variant="tertiary"
+                  icon={DeleteIcon}
+                  tone="critical"
+                  accessibilityLabel="Delete voucher"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleOpenDeleteModal(id);
+                  }}
+                />
+              </Tooltip>
             </InlineStack>
           </IndexTable.Cell>
         </IndexTable.Row>
       );
     },
-    [adminDetails_?.currency],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currency],
   );
 
   return (
@@ -186,11 +165,8 @@ function VoucherTable() {
       />
       <Page
         title="Voucher Management"
-        primaryAction={{
-          icon: PlusIcon,
-          content: "Add Voucher",
-          onAction: goToAddVoucher,
-        }}
+        subtitle="Credit packs customers can buy to top up their wallet."
+        primaryAction={{ icon: PlusIcon, content: "Create voucher", onAction: goToAddVoucher }}
       >
         <Layout>
           <Layout.Section>
@@ -198,11 +174,15 @@ function VoucherTable() {
               data={data}
               headings={headings}
               renderRow={renderVoucherRow}
+              resourceName={{ singular: "voucher", plural: "vouchers" }}
               page={page}
               setPage={setPage}
               limit={limit}
               totalItems={totalItems}
-              loading={adminDetailsLoading}
+              loading={adminDetailsLoading && data.length === 0}
+              emptyTitle="No vouchers yet"
+              emptyDescription="Create a credit pack so customers can add funds to their wallet."
+              emptyAction={{ content: "Create voucher", onAction: goToAddVoucher }}
             />
           </Layout.Section>
         </Layout>

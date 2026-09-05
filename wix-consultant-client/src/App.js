@@ -54,8 +54,6 @@
   const ProfileSection = lazy(
     () => import("./components/ClientDashbord/ProfileSection"),
   );
-  const Voucher = lazy(() => import("./pages/Voucher"));
-  const History = lazy(() => import("./pages/History"));
   const VoucherSettings = lazy(() => import("./pages/VoucherSettings"));
   const FcmTokenWindow = lazy(() => import("./firebase/utils/FcmTokenWindow"));
   const UserTransHistory = lazy(() => import("./pages/UserTransHistory"));
@@ -353,12 +351,7 @@
                   <ProfileSection />
                 </StorefrontShell>
               }
-            >
-              <Route index element={<Voucher />} />
-              <Route path="voucher" element={<Voucher />} />
-              <Route path="history" element={<History />} />
-              <Route path="call-chat-logs" element={<CallLogsConsultant />} />
-            </Route>
+            />
 
             <Route
               path="/consultant-dashboard"

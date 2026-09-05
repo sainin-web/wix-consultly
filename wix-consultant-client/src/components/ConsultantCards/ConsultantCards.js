@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 // bootstrap is already imported globally in index.js — no per-page import.
 import "../../components/ConsultantCards/ConsultantCards.css";
+import "../../css/storefront-tokens.css";
 import "./StorefrontHome.css";
 import { fetchConsultants } from "../Redux/slices/ConsultantSlices";
 import { useDispatch, useSelector } from "react-redux";

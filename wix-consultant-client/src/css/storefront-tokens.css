@@ -1,0 +1,32 @@
+/* ============================================================
+   STOREFRONT DESIGN TOKENS — single source
+   ------------------------------------------------------------
+   Shared by the public storefront surfaces (navbar, home, customer
+   profile). Declared on each root class rather than :root so they
+   cannot leak into the consultant dashboard or admin pages.
+   ============================================================ */
+
+.storefront-nav,
+.consultant-home,
+.customer-profile {
+  --sf-accent: #ff6b35;
+  --sf-accent-strong: #e85d28;
+  --sf-accent-soft: #fff4f0;
+  --sf-ink: #101828;
+  --sf-ink-2: #475467;
+  --sf-muted: #667085;
+  --sf-line: #e7eaee;
+  --sf-line-soft: #f1f3f5;
+  --sf-surface: #ffffff;
+  --sf-surface-2: #f8f9fb;
+  --sf-success-ink: #067647;
+  --sf-success-bg: #ecfdf3;
+  --sf-warn-ink: #b54708;
+  --sf-warn-bg: #fffaeb;
+  --sf-danger-ink: #b42318;
+  --sf-danger-bg: #fef3f2;
+  --sf-radius-card: 14px;
+  --sf-radius-ctl: 10px;
+  --sf-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}

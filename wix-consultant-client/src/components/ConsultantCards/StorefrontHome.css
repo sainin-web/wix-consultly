@@ -1,0 +1,504 @@
+/* ============================================================
+   STOREFRONT HOME — consultant marketplace
+   ------------------------------------------------------------
+   Scope: the Home page only (page intro, consultant grid,
+   consultant card, empty state, login prompt).
+
+   Everything here is namespaced under .consultant-home so it
+   cannot collide with ConsultantCards.css, which is shared with
+   ViewProfile and must keep its existing rules intact.
+
+   Design tokens (--sf-*) are declared in StorefrontNavbar.css and
+   re-declared on .consultant-home so this page renders correctly
+   even when the navbar is not mounted.
+
+   HEIGHT RULE: no vh units, no fixed heights, no min-height on any
+   page-level container. The Wix iframe measures real content height.
+   ============================================================ */
+
+.consultant-home {
+  font-family: var(--sf-font);
+  color: var(--sf-ink);
+  background: var(--sf-surface);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Content column. Bounded so the grid never spans an ultra-wide page. */
+.consultant-home__inner {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px 20px 32px;
+  box-sizing: border-box;
+}
+
+/* ── Page intro ──────────────────────────────────────────────
+   Deliberately not a hero: no gradient, no banner, no large type.
+   It labels the list and nothing more.                          */
+
+.consultant-home__intro {
+  margin-bottom: 20px;
+}
+
+.consultant-home__title {
+  margin: 0 0 5px;
+  font-size: 22px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  color: var(--sf-ink);
+}
+
+.consultant-home__subtitle {
+  margin: 0;
+  max-width: 52ch;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--sf-muted);
+}
+
+.consultant-home__count {
+  display: inline-block;
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sf-ink-2);
+}
+
+/* ── Grid ────────────────────────────────────────────────────
+   auto-FILL (not auto-fit): empty tracks are preserved, so a
+   single consultant occupies one ~360px column instead of being
+   stretched across the full width.                              */
+
+.consultant-home__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+
+/* ── Card ────────────────────────────────────────────────────
+   Level 1 identity → Level 2 credentials → Level 3 actions.     */
+
+.cc-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-line);
+  border-radius: var(--sf-radius-card);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.cc-card:hover {
+  border-color: #d8dde3;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04),
+    0 8px 24px -6px rgba(16, 24, 40, 0.1);
+  transform: translateY(-2px);
+}
+
+.cc-card:focus-visible {
+  outline: 2px solid var(--sf-accent);
+  outline-offset: 2px;
+}
+
+/* Level 1 — identity */
+
+.cc-card__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  padding: 18px 18px 14px;
+}
+
+.cc-card__avatar-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+/*
+ * Neutral 1px ring instead of the previous 3px yellow ring: the avatar
+ * should read as a portrait, not as a decorated badge.
+ */
+.cc-card__avatar {
+  display: block;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--sf-surface-2);
+  border: 1px solid var(--sf-line);
+}
+
+.cc-card__identity {
+  min-width: 0;
+  flex: 1;
+  padding-top: 1px;
+}
+
+.cc-card__name {
+  margin: 0 0 3px;
+  font-size: 15.5px;
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--sf-ink);
+  overflow-wrap: anywhere;
+}
+
+.cc-card__profession {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--sf-muted);
+  overflow-wrap: anywhere;
+}
+
+/*
+ * Status is a labelled pill in the text column, not a dot stuck to the
+ * avatar — "Available" is meaningful where a bare dot is not.
+ */
+.cc-card__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px 3px 7px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.cc-card__status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.cc-card__status--online {
+  color: #067647;
+  background: #ecfdf3;
+}
+
+.cc-card__status--busy {
+  color: #b54708;
+  background: #fffaeb;
+}
+
+.cc-card__status--offline {
+  color: var(--sf-muted);
+  background: var(--sf-surface-2);
+}
+
+/* Level 2 — credentials */
+
+.cc-card__meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 14px;
+  padding: 13px 18px;
+  border-top: 1px solid var(--sf-line-soft);
+  border-bottom: 1px solid var(--sf-line-soft);
+  background: #fcfcfd;
+}
+
+.cc-card__meta-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--sf-muted);
+}
+
+.cc-card__meta-value {
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.45;
+  color: var(--sf-ink);
+  overflow-wrap: anywhere;
+}
+
+/* Level 3 — consultation options */
+
+.cc-card__actions {
+  padding: 14px 18px 16px;
+  margin-top: auto;
+}
+
+.cc-card__actions-label {
+  display: block;
+  margin-bottom: 9px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--sf-muted);
+}
+
+.cc-card__options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.cc-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 10px 4px 9px;
+  min-width: 0;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-line);
+  border-radius: var(--sf-radius-ctl);
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.cc-option:hover {
+  background: var(--sf-accent-soft);
+  border-color: var(--sf-accent);
+}
+
+.cc-option:focus-visible {
+  outline: 2px solid var(--sf-accent);
+  outline-offset: 1px;
+}
+
+.cc-option:active {
+  box-shadow: inset 0 1px 2px rgba(16, 24, 40, 0.08);
+}
+
+.cc-option__icon {
+  display: grid;
+  place-items: center;
+  color: var(--sf-muted);
+  transition: color 0.15s ease;
+}
+
+.cc-option:hover .cc-option__icon {
+  color: var(--sf-accent);
+}
+
+.cc-option__icon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.cc-option__label {
+  font-size: 11.5px;
+  font-weight: 550;
+  line-height: 1.2;
+  color: var(--sf-ink-2);
+  white-space: nowrap;
+}
+
+.cc-option__price {
+  font-size: 13px;
+  font-weight: 680;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  color: var(--sf-ink);
+  white-space: nowrap;
+}
+
+/* ── Empty state ─────────────────────────────────────────── */
+
+.consultant-home__empty {
+  padding: 44px 24px;
+  text-align: center;
+  background: var(--sf-surface-2);
+  border: 1px solid var(--sf-line);
+  border-radius: var(--sf-radius-card);
+}
+
+.consultant-home__empty-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-line);
+  color: var(--sf-muted);
+}
+
+.consultant-home__empty-title {
+  margin: 0 0 5px;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--sf-ink);
+}
+
+.consultant-home__empty-text {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--sf-muted);
+}
+
+/* ── Login prompt ────────────────────────────────────────── */
+
+.cc-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(16, 24, 40, 0.5);
+}
+
+.cc-modal__panel {
+  width: 100%;
+  max-width: 372px;
+  padding: 26px 24px 22px;
+  background: var(--sf-surface);
+  border-radius: 16px;
+  box-shadow: 0 20px 48px -12px rgba(16, 24, 40, 0.3);
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.cc-modal__icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  background: var(--sf-accent-soft);
+  color: var(--sf-accent);
+}
+
+.cc-modal__title {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 680;
+  color: var(--sf-ink);
+}
+
+.cc-modal__text {
+  margin: 0 0 20px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--sf-muted);
+}
+
+.cc-modal__actions {
+  display: flex;
+  gap: 9px;
+}
+
+.cc-modal__btn {
+  flex: 1;
+  padding: 10px 16px;
+  border-radius: var(--sf-radius-ctl);
+  border: 1px solid transparent;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.cc-modal__btn:focus-visible {
+  outline: 2px solid var(--sf-accent);
+  outline-offset: 1px;
+}
+
+.cc-modal__btn--primary {
+  background: var(--sf-accent);
+  color: #fff;
+}
+
+.cc-modal__btn--primary:hover {
+  background: #e85d28;
+}
+
+.cc-modal__btn--ghost {
+  background: var(--sf-surface);
+  border-color: var(--sf-line);
+  color: var(--sf-ink-2);
+}
+
+.cc-modal__btn--ghost:hover {
+  background: var(--sf-surface-2);
+}
+
+/* ── Responsive ──────────────────────────────────────────── */
+
+@media (max-width: 767.98px) {
+  .consultant-home__inner {
+    padding: 20px 16px 26px;
+  }
+
+  .consultant-home__title {
+    font-size: 19px;
+  }
+
+  .consultant-home__subtitle {
+    font-size: 13.5px;
+  }
+
+  .consultant-home__grid {
+    /* One column: 300px minimums would overflow a 360px viewport. */
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+}
+
+@media (max-width: 400px) {
+  .cc-card__head {
+    padding: 16px 15px 12px;
+    gap: 11px;
+  }
+
+  .cc-card__avatar {
+    width: 52px;
+    height: 52px;
+  }
+
+  .cc-card__meta,
+  .cc-card__actions {
+    padding-left: 15px;
+    padding-right: 15px;
+  }
+
+  .cc-card__options {
+    gap: 6px;
+  }
+
+  .cc-option {
+    padding: 9px 2px 8px;
+  }
+
+  .cc-option__label {
+    font-size: 11px;
+  }
+
+  .cc-option__price {
+    font-size: 12.5px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-card,
+  .cc-option {
+    transition: none;
+  }
+
+  .cc-card:hover {
+    transform: none;
+  }
+}

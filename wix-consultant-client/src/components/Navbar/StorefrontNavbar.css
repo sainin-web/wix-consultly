@@ -1,0 +1,172 @@
+/* ============================================================
+   STOREFRONT SECONDARY NAVIGATION
+   ------------------------------------------------------------
+   This renders BELOW the Wix site header, so it is deliberately
+   light: one compact bar, no site branding weight, no sticky
+   behaviour, no shadow. It reads as application navigation, not
+   as a second website header.
+
+   Design tokens are declared here and reused by StorefrontHome.css
+   so the storefront has ONE visual system.
+   ============================================================ */
+
+.storefront-nav,
+.consultant-home {
+  --sf-accent: #ff6b35;
+  --sf-accent-soft: #fff4f0;
+  --sf-ink: #101828;
+  --sf-ink-2: #475467;
+  --sf-muted: #667085;
+  --sf-line: #e7eaee;
+  --sf-line-soft: #f1f3f5;
+  --sf-surface: #ffffff;
+  --sf-surface-2: #f8f9fb;
+  --sf-radius-card: 14px;
+  --sf-radius-ctl: 10px;
+  --sf-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+.storefront-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  /* Compact: the Wix header already occupies the top of the page. */
+  padding: 9px 20px;
+  background: var(--sf-surface);
+  border-bottom: 1px solid var(--sf-line);
+  font-family: var(--sf-font);
+  box-sizing: border-box;
+}
+
+/* ── Section label ───────────────────────────────────────── */
+
+.storefront-nav__brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--sf-ink);
+  white-space: nowrap;
+}
+
+.storefront-nav__mark {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  background: var(--sf-accent);
+  color: #fff;
+}
+
+.storefront-nav__mark svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* ── Links ───────────────────────────────────────────────── */
+
+.storefront-nav__links {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  /* Safety valve only — at every breakpoint the three items fit. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.storefront-nav__links::-webkit-scrollbar {
+  display: none;
+}
+
+.storefront-nav__link {
+  position: relative;
+  flex-shrink: 0;
+  padding: 8px 12px;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--sf-muted);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.storefront-nav__link:hover {
+  color: var(--sf-ink);
+  background: var(--sf-surface-2);
+}
+
+.storefront-nav__link:focus-visible {
+  outline: 2px solid var(--sf-accent);
+  outline-offset: 1px;
+}
+
+/*
+ * Active state: weight + colour + a 2px rule that sits ON the nav's
+ * bottom border. Replaces the oversized black pill.
+ * -10px == .storefront-nav vertical padding, so the rule lands exactly
+ * on the border regardless of link height.
+ */
+.storefront-nav__link.is-active {
+  color: var(--sf-ink);
+  font-weight: 650;
+}
+
+.storefront-nav__link.is-active::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -10px;
+  height: 2px;
+  background: var(--sf-accent);
+  border-radius: 2px 2px 0 0;
+}
+
+/* ── Mobile ──────────────────────────────────────────────── */
+
+/*
+ * Under 640px the label is dropped rather than wrapped onto a second
+ * line: the Wix site header already establishes identity, and a second
+ * row would cost vertical space on the smallest screens. The three
+ * links then fit one row at 360px without scrolling.
+ */
+@media (max-width: 639.98px) {
+  .storefront-nav {
+    padding: 8px 12px;
+    justify-content: center;
+  }
+
+  .storefront-nav__brand {
+    display: none;
+  }
+
+  .storefront-nav__links {
+    width: 100%;
+    justify-content: space-between;
+    gap: 2px;
+  }
+
+  .storefront-nav__link {
+    padding: 8px 6px;
+    font-size: 12.5px;
+  }
+
+  .storefront-nav__link.is-active::after {
+    left: 6px;
+    right: 6px;
+    bottom: -9px;
+  }
+}

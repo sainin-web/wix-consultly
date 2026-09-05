@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from "react";
-import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
-import "bootstrap/dist/css/bootstrap.min.css";
+import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+// bootstrap is already imported globally in index.js — no per-page import.
 import "../../components/ConsultantCards/ConsultantCards.css";
+import "./StorefrontHome.css";
 import { fetchConsultants } from "../Redux/slices/ConsultantSlices";
 import { useDispatch, useSelector } from "react-redux";
 import { KEYS, getCustomerId } from "../../utils/wixStorage";
@@ -21,6 +22,76 @@ export const checkMicPermission = async () => {
     return "prompt";
   }
 };
+
+const ICONS = {
+  chat: (
+    <path
+      d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  ),
+  voice: (
+    <path
+      d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  ),
+  video: (
+    <>
+      <path
+        d="M23 7L16 12L23 17V7Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M14 5H3C1.9 5 1 5.9 1 7V17C1 18.1 1.9 19 3 19H14C15.1 19 16 18.1 16 17V7C16 5.9 15.1 5 14 5Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </>
+  ),
+};
+
+/**
+ * One consultation method (chat / audio / video).
+ * `onSelect` receives the click event so the caller keeps its existing
+ * stopPropagation behaviour — the surrounding card is clickable too.
+ */
+function ConsultationOption({ kind, label, price, onSelect }) {
+  return (
+    <button
+      type="button"
+      className="cc-option"
+      onClick={onSelect}
+      aria-label={`Start ${label} consultation, ${price} per minute`}
+    >
+      <span className="cc-option__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          {ICONS[kind]}
+        </svg>
+      </span>
+      <span className="cc-option__label">{label}</span>
+      <span className="cc-option__price">{price}</span>
+    </button>
+  );
+}
+
+/** Availability as a labelled pill rather than a bare dot on the avatar. */
+function availability({ isBusy, isActive }) {
+  if (isBusy) return { modifier: "busy", text: "In session" };
+  if (isActive) return { modifier: "online", text: "Available" };
+  return { modifier: "offline", text: "Offline" };
+}
 
 function ConsultantCards() {
   const dispatch = useDispatch();
@@ -146,7 +217,7 @@ function ConsultantCards() {
 
   if (initialLoading || loading) {
     return (
-      <div className="consultant-cards-page">
+      <div className="consultant-home">
         <div className="page-loader">
           <div className="loader-container">
             <div className="loader-spinner"></div>
@@ -181,276 +252,225 @@ function ConsultantCards() {
     navigate(`/chats/${consultantView}`);
   };
 
+  const total = mappedConsultants.length;
+
   return (
-    <div className="consultant-cards-page">
+    <div className="consultant-home">
       {loginPrompt && (
         <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 9999,
-            background: "rgba(0,0,0,0.45)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
+          className="cc-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="cc-login-title"
         >
-          <div
-            style={{
-              background: "#fff",
-              borderRadius: 12,
-              padding: "36px 32px",
-              maxWidth: 380,
-              width: "90%",
-              textAlign: "center",
-              boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
-            }}
-          >
-            <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
-            <h2
-              style={{ margin: "0 0 8px", fontSize: "1.3rem", color: "#111" }}
-            >
-              Login Required
-            </h2>
-            <p style={{ color: "#666", marginBottom: 24, fontSize: "0.95rem" }}>
-              You cannot access this feature without logging in. Please login
-              first.
-            </p>
-            <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-              <button
-                onClick={() => navigate("/login")}
-                style={{
-                  background: "#111",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: 8,
-                  padding: "10px 24px",
-                  fontSize: "0.95rem",
-                  cursor: "pointer",
-                  fontWeight: 600,
-                }}
+          <div className="cc-modal__panel">
+            <div className="cc-modal__icon" aria-hidden="true">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
               >
-                Login
-              </button>
+                <rect
+                  x="3"
+                  y="11"
+                  width="18"
+                  height="11"
+                  rx="2"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                />
+                <path
+                  d="M7 11V7a5 5 0 0 1 10 0v4"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </div>
+            <h2 className="cc-modal__title" id="cc-login-title">
+              Login required
+            </h2>
+            <p className="cc-modal__text">
+              You need to be logged in to start a consultation. Please log in to
+              continue.
+            </p>
+            <div className="cc-modal__actions">
               <button
+                type="button"
+                className="cc-modal__btn cc-modal__btn--ghost"
                 onClick={() => setLoginPrompt(false)}
-                style={{
-                  background: "#f3f4f6",
-                  color: "#444",
-                  border: "none",
-                  borderRadius: 8,
-                  padding: "10px 24px",
-                  fontSize: "0.95rem",
-                  cursor: "pointer",
-                }}
               >
                 Cancel
+              </button>
+              <button
+                type="button"
+                className="cc-modal__btn cc-modal__btn--primary"
+                onClick={() => navigate("/login")}
+              >
+                Login
               </button>
             </div>
           </div>
         </div>
       )}
-      <div className="container py-4 flex justify-content-center align-items-center">
-        <div
-          className="row"
-          style={{ gap: "1.5rem", margin: "10px", width: "100%" }}
-        >
-          {mappedConsultants.length === 0 ? (
-            <div className="col-12 text-center py-5">
-              <p>No consultants found.</p>
+
+      <div className="consultant-home__inner">
+        <header className="consultant-home__intro">
+          <h1 className="consultant-home__title">Find your consultant</h1>
+          <p className="consultant-home__subtitle">
+            Connect with experienced professionals and choose the consultation
+            method that works for you.
+          </p>
+          {total > 0 && (
+            <span className="consultant-home__count">
+              {total} {total === 1 ? "consultant" : "consultants"} available
+            </span>
+          )}
+        </header>
+
+        {total === 0 ? (
+          <div className="consultant-home__empty">
+            <div className="consultant-home__empty-icon" aria-hidden="true">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <circle
+                  cx="9"
+                  cy="7"
+                  r="4"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                />
+              </svg>
             </div>
-          ) : (
-            mappedConsultants.map((consultant) => {
+            <p className="consultant-home__empty-title">
+              No consultants available
+            </p>
+            <p className="consultant-home__empty-text">
+              Please check back later.
+            </p>
+          </div>
+        ) : (
+          <div className="consultant-home__grid">
+            {mappedConsultants.map((consultant) => {
               const shop_id = consultant.shop_id;
               const consultant_id = consultant.id;
-              console.log("shop_id", shop_id);
+              const status = availability(consultant);
+              const languages = Array.isArray(consultant.languages)
+                ? consultant.languages.join(", ")
+                : String(consultant.languages || "—");
+
               return (
-                <div
+                <article
                   key={consultant.id}
-                  className="col-lg-3 col-md-6 col-sm-12 "
-                  style={{ boxShadow: "0 0 10px 0 rgba(0, 0, 0, 0.1)" }}
+                  className="cc-card"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => viewProfile(shop_id, consultant_id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      viewProfile(shop_id, consultant_id);
+                    }
+                  }}
+                  aria-label={`View profile of ${consultant.name}`}
                 >
-                  <div
-                    className="card shadow-sm border-0 consultant-card"
-                    // onClick={() => navigate(`/view-profile/${shop_id}/${consultant_id}`)}
-                    onClick={() => viewProfile(shop_id, consultant_id)}
-                    style={{ cursor: "pointer" }}
-                  >
-                    <div className="card-body p-4">
-                      {/* Profile Section */}
-                      <div className="flex align-items-start mb-3">
-                        {/* Profile Image */}
-                        <div className="me-3 position-relative flex-shrink-0">
-                          <img
-                            src={
-                              consultant.image || "/images/flag/teamdefault.png"
-                            }
-                            alt={consultant.name}
-                            className="rounded-circle profile-image"
-                            onError={(e) => {
-                              e.target.src = "/images/flag/teamdefault.png";
-                            }}
-                          />
-                          {consultant.isActive && (
-                            <span className="active-status-dot"></span>
-                          )}
-                        </div>
+                  {/* Level 1 — identity */}
+                  <div className="cc-card__head">
+                    <div className="cc-card__avatar-wrap">
+                      <img
+                        src={consultant.image || "/images/flag/teamdefault.png"}
+                        alt=""
+                        className="cc-card__avatar"
+                        loading="lazy"
+                        onError={(e) => {
+                          e.target.src = "/images/flag/teamdefault.png";
+                        }}
+                      />
+                    </div>
 
-                        {/* Name and Details */}
-                        <div className="flex-grow-1">
-                          <div className="flex align-items-center gap-2 mb-2">
-                            <h5 className="card-title mb-0 fw-bold consultant-name">
-                              {consultant.name}
-                            </h5>
-                            <span className="experience-badge">
-                              {consultant.experience}+ Years of Experience
-                            </span>
-                          </div>
-                          <p className="mb-2 consultant-profession">
-                            {consultant.profession}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Divider */}
-                      <hr className="card-divider" />
-
-                      {/* Information Section */}
-                      <div className="mb-0">
-                        <p className="mb-2 consultant-info">
-                          <strong>Speaks:</strong>{" "}
-                          {consultant.languages.join(", ")}
-                        </p>
-                        <div className="mb-0">
-                          <div className="d-flex align-items-center gap-2 mb-2">
-                            <strong className="consultant-info d-block">
-                              Calling Options:
-                            </strong>
-                            {consultant.isBusy && (
-                              <span className="busy-status-dot text-danger">
-                                {/* wait for 5 minutes */}
-                              </span>
-                            )}
-                          </div>
-                          <div className="calling-options">
-                            <button
-                              className={`calling-option-btn chat-btn}`}
-                              // disabled={consultant.isBusy}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                viewChatsPage(consultant.id);
-                              }}
-                            >
-                              <div className="calling-option-content">
-                                <svg
-                                  width="16"
-                                  height="16"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  xmlns="http://www.w3.org/2000/svg"
-                                >
-                                  <path
-                                    d="M20 2H4C2.9 2 2 2.9 2 4V22L6 18H20C21.1 18 22 17.1 22 16V4C22 2.9 21.1 2 20 2Z"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  />
-                                </svg>
-                                <span className="calling-option-label">
-                                  Chat
-                                </span>
-                              </div>
-                              <span className="calling-option-price">
-                                {consultant.chatPrice.toLocaleString()}
-                              </span>
-                            </button>
-                            <button
-                              className="calling-option-btn audio-btn"
-                              // disabled={consultant.isBusy}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                startCall({
-                                  receiverId: consultant.id,
-                                  type: "voice",
-                                });
-                              }}
-                            >
-                              <div className="calling-option-content">
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  width="16"
-                                  height="16"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  className="lucide lucide-phone-icon lucide-phone"
-                                >
-                                  <path d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384" />
-                                </svg>
-                                <span className="calling-option-label">
-                                  Audio
-                                </span>
-                              </div>
-                              <span className="calling-option-price">
-                                {consultant.audioPrice.toLocaleString()}
-                              </span>
-                            </button>
-                            <button
-                              className="calling-option-btn video-btn"
-                              // disabled={consultant.isBusy}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                startCall({
-                                  receiverId: consultant.id,
-                                  type: "video",
-                                });
-                              }}
-                            >
-                              <div className="calling-option-content">
-                                <svg
-                                  width="16"
-                                  height="16"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  xmlns="http://www.w3.org/2000/svg"
-                                >
-                                  <path
-                                    d="M23 7L16 12L23 17V7Z"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  />
-                                  <path
-                                    d="M14 5H3C1.9 5 1 5.9 1 7V17C1 18.1 1.9 19 3 19H14C15.1 19 16 18.1 16 17V7C16 5.9 15.1 5 14 5Z"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  />
-                                </svg>
-                                <span className="calling-option-label">
-                                  Video
-                                </span>
-                              </div>
-                              <span className="calling-option-price">
-                                {consultant.videoPrice.toLocaleString()}
-                              </span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
+                    <div className="cc-card__identity">
+                      <h2 className="cc-card__name">{consultant.name}</h2>
+                      <p className="cc-card__profession">
+                        {consultant.profession}
+                      </p>
+                      <span
+                        className={`cc-card__status cc-card__status--${status.modifier}`}
+                      >
+                        {status.text}
+                      </span>
                     </div>
                   </div>
-                </div>
+
+                  {/* Level 2 — credentials */}
+                  <div className="cc-card__meta">
+                    <span className="cc-card__meta-label">Experience</span>
+                    <span className="cc-card__meta-label">Languages</span>
+                    <span className="cc-card__meta-value">
+                      {consultant.experience}+ Years
+                    </span>
+                    <span className="cc-card__meta-value">{languages}</span>
+                  </div>
+
+                  {/* Level 3 — consultation options */}
+                  <div className="cc-card__actions">
+                    <span className="cc-card__actions-label">
+                      Consultation options
+                    </span>
+                    <div className="cc-card__options">
+                      <ConsultationOption
+                        kind="chat"
+                        label="Chat"
+                        price={consultant.chatPrice.toLocaleString()}
+                        onSelect={(e) => {
+                          e.stopPropagation();
+                          viewChatsPage(consultant.id);
+                        }}
+                      />
+                      <ConsultationOption
+                        kind="voice"
+                        label="Audio"
+                        price={consultant.audioPrice.toLocaleString()}
+                        onSelect={(e) => {
+                          e.stopPropagation();
+                          startCall({
+                            receiverId: consultant.id,
+                            type: "voice",
+                          });
+                        }}
+                      />
+                      <ConsultationOption
+                        kind="video"
+                        label="Video"
+                        price={consultant.videoPrice.toLocaleString()}
+                        onSelect={(e) => {
+                          e.stopPropagation();
+                          startCall({
+                            receiverId: consultant.id,
+                            type: "video",
+                          });
+                        }}
+                      />
+                    </div>
+                  </div>
+                </article>
               );
-            })
-          )}
-        </div>
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -144,6 +144,9 @@ const { onboardingRoute } = require("./Routes/onboardingRoute");
 app.use("/api/onboarding", onboardingRoute);
 /** Chat Routes */
 app.use("/api/chat", chatRoutes);
+const { voucherRoutes } = require("./Routes/voucherRoutes");
+app.use("/api/vouchers", voucherRoutes);
+require("./services/voucherPurchase").startMaintenance();
 // app.use("/api", firebaseRouter);
 
 /** User Routes */

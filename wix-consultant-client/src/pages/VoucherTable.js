@@ -56,7 +56,8 @@ function VoucherTable() {
         extraCoin: voucher.extraCoin?.$numberDecimal
           ? parseFloat(voucher.extraCoin.$numberDecimal)
           : Number(voucher.extraCoin) || 0,
-        status: voucher.status || "Active",
+        active: voucher.active !== false,
+        status: voucher.active === false ? "Inactive" : "Active",
       }));
       setData(mapped);
       setTotalItems(mapped.length);
@@ -88,6 +89,25 @@ function VoucherTable() {
     }
   };
 
+  // Deactivated packs stay in the table but are hidden from customers and
+  // refused at purchase time (server-side check).
+  const toggleActive = async (voucher) => {
+    const token = await getWixAdminToken();
+    setLoading(true);
+    try {
+      await axios.put(
+        `${process.env.REACT_APP_BACKEND_HOST}/api/admin/admin/voucher-updates/${adminIdLocal}/${voucher.id}`,
+        { active: !voucher.active },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      setReLoadApi((prev) => !prev);
+    } catch (error) {
+      console.error("Error updating voucher status:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const goToAddVoucher = () => navigate(`/admin/voucher-management/voucher`);
 
   // Edit reuses the existing settings route, which already reads
@@ -99,7 +119,7 @@ function VoucherTable() {
 
   const renderVoucherRow = useCallback(
     (voucher, index) => {
-      const { id, voucherCode, totalCoin, extraCoin, status } = voucher;
+      const { id, voucherCode, totalCoin, extraCoin, status, active } = voucher;
       return (
         <IndexTable.Row id={id} key={id || index} position={index}>
           <IndexTable.Cell>
@@ -117,10 +137,13 @@ function VoucherTable() {
             </Text>
           </IndexTable.Cell>
           <IndexTable.Cell>
-            <Badge tone="success">{status}</Badge>
+            <Badge tone={active ? "success" : "attention"}>{status}</Badge>
           </IndexTable.Cell>
           <IndexTable.Cell>
             <InlineStack align="end" gap="100" wrap={false}>
+              <Button size="slim" onClick={(e) => { e.stopPropagation(); toggleActive(voucher); }} disabled={loading}>
+                {active ? "Deactivate" : "Activate"}
+              </Button>
               <Tooltip content="Edit">
                 <Button
                   variant="tertiary"

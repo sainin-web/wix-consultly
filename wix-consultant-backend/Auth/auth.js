@@ -23,6 +23,7 @@ const verify_Token = async (request) => {
       }
 
       const jwt_ = JWT.verify(token,process.env.JWT_SECRET_KEY)
+      if (jwt_ && jwt_.typ === "customer") return false // storefront customer session, not a consultant
       return !!jwt_ && jwt_
    } catch (err) {
       console.log("token is invalid ", err)

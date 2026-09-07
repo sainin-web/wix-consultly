@@ -2,6 +2,7 @@ const axios = require("axios");
 const { shopModel } = require("../Modal/shopify");
 const dotenv = require("dotenv")
 dotenv.config()
+const WIX_API = (process.env.WIX_API_BASE || "https://www.wixapis.com").replace(/\/$/, ""); // overridable only for the E2E mock
 
 /**
  * Fetch the site display name / domain from Wix Site Properties API
@@ -28,7 +29,7 @@ const handleWixInstall = async ({ instanceId, appDefId = "", siteOwnerId = "", s
 
         // 2. Wix Token API Call
         const tokenRes = await axios.post(
-            "https://www.wixapis.com/oauth2/token",
+            `${WIX_API}/oauth2/token`,
             {
                 grant_type: "client_credentials",
                 client_id: process.env.WIX_CLIENT_ID,

@@ -23,6 +23,8 @@ const shop = new mongoose.Schema({
   vouchers: [
     {
       voucherCode: String,
+      name: String,
+      active: { type: Boolean, default: true },
       totalCoin: Number,
       extraCoin: Number,
       wixProductId: String,

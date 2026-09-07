@@ -17,6 +17,8 @@ export const KEYS = {
   CUSTOMER_LAST: "wix_last_name",
   CUSTOMER_PHOTO: "wix_photo",
   CUSTOMER_MEMBER: "wix_member_id",
+  /** Customer session JWT minted by /api/wix-user-session after Wix member verification */
+  CUSTOMER_TOKEN: "wix_customer_token",
 };
 
 export const SOCKET_ROLE = {
@@ -157,6 +159,7 @@ export function persistCustomerId(dbId, extras = {}) {
   if (extras.photo) localStorage.setItem(KEYS.CUSTOMER_PHOTO, extras.photo);
   if (extras.memberId)
     localStorage.setItem(KEYS.CUSTOMER_MEMBER, extras.memberId);
+  if (extras.token) localStorage.setItem(KEYS.CUSTOMER_TOKEN, extras.token);
   notifySocketIdentity();
 }
 

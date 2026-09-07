@@ -245,21 +245,31 @@ class ConsultantLogin extends HTMLElement {
 
   async _processMember(data, resolve) {
     try {
-      const res = await fetch(`${BACKEND}/api/wix-user-session`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          wixMemberId: data.memberId,
-          email: data.email,
-          firstName: data.firstName || "",
-          lastName: data.lastName || "",
-          photo: data.photo || "",
-          instanceId: this.instanceId,
-        }),
+      const body = JSON.stringify({
+        wixMemberId: data.memberId,
+        email: data.email,
+        firstName: data.firstName || "",
+        lastName: data.lastName || "",
+        photo: data.photo || "",
+        instanceId: this.instanceId,
       });
+      // fetchWithAuth sends the member's Wix access token, which the backend
+      // verifies with Wix before issuing a customer session token (needed for
+      // purchases). Plain fetch is the fallback for hosts without the SDK bridge.
+      let res;
+      try {
+        res = await withTimeout(
+          wixClient.fetchWithAuth(`${BACKEND}/api/wix-user-session`, { method: "POST", headers: { "Content-Type": "application/json" }, body }),
+          6000,
+          "wix-user-session(fetchWithAuth)",
+        );
+      } catch (authErr) {
+        console.warn("[WIDGET] fetchWithAuth session failed → plain fetch:", authErr.message);
+        res = await fetch(`${BACKEND}/api/wix-user-session`, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+      }
 
       const saved = await res.json();
-      console.log("✅ DB save:", saved.dbId);
+      console.log("✅ DB save:", saved.dbId, "verified:", Boolean(saved.verified));
 
       if (saved.dbId) {
         localStorage.setItem("wix_customer_id", saved.dbId);
@@ -279,6 +289,7 @@ class ConsultantLogin extends HTMLElement {
           lastName: data.lastName || "",
           photo: data.photo || "",
           dbId: saved.dbId,
+          token: saved.token || "",
         };
       }
     } catch (e) {
@@ -319,6 +330,7 @@ class ConsultantLogin extends HTMLElement {
       params.set("wixLastName", this.wixMember.lastName || "");
       params.set("wixPhoto", this.wixMember.photo || "");
       params.set("wixDbId", this.wixMember.dbId || "");
+      if (this.wixMember.token) params.set("wixToken", this.wixMember.token);
       console.log("✅ Logged in user — dashboard load hoga");
     } else {
       params.set("wixLoggedIn", "false");

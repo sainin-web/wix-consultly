@@ -3,20 +3,61 @@ const { shopModel } = require("../Modal/shopify");
 const { handleWixInstall } = require("../services/wix.service");
 const axios = require("axios");
 const { User } = require("../Modal/userSchema"); // your user model
+const { verifyWixWebhook, hasPublicKey } = require("../services/wixWebhookVerify");
+const voucherPurchase = require("../services/voucherPurchase");
+
+const ECOM_ORDER_EVENTS = new Set([
+  "wix.ecom.v1.order_payment_status_updated",
+  "wix.ecom.v1.order_approved",
+  "wix.ecom.v1.order_updated",
+]);
+
+/**
+ * eCommerce order events (Payment Status Updated / Order Approved). Only a
+ * signature-verified JWT is accepted; the order is then re-fetched from Wix and
+ * the purchase finalized exactly once (services/voucherPurchase.js).
+ */
+async function handleEcomEvent(raw) {
+  console.log("[WIX WEBHOOK] Webhook received (ecom candidate)");
+  const v = verifyWixWebhook(raw);
+  if (!v.verified) {
+    console.error("[WIX WEBHOOK] REJECTED — not verified:", v.reason, hasPublicKey() ? "" : "(set WIX_WEBHOOK_PUBLIC_KEY)");
+    return { handled: true, rejected: v.reason };
+  }
+  const { eventType, instanceId } = v.envelope || {};
+  const ev = v.event || {};
+  if (!ECOM_ORDER_EVENTS.has(eventType) && ev.entityFqdn !== "wix.ecom.v1.order") return { handled: false };
+  console.log("[WIX WEBHOOK] Event verified", { eventType, instanceId, eventId: ev.id, slug: ev.slug, orderId: ev.entityId });
+  const orderFromEvent = ev.actionEvent?.body?.order || ev.currentEntity || ev.entity || null;
+  const orderId = ev.entityId || orderFromEvent?.id || null;
+  const r = await voucherPurchase.handleOrderEvent({ eventId: ev.id, eventType, instanceId, orderId, orderFromEvent });
+  console.log("[WIX WEBHOOK] ecom event result", r);
+  return { handled: true, result: r };
+}
+
+function rawBodyString(req) {
+  if (Buffer.isBuffer(req.body)) return req.body.toString("utf-8");
+  if (req.body?.type === "Buffer" && Array.isArray(req.body.data)) return Buffer.from(req.body.data).toString("utf-8");
+  if (typeof req.body === "string") return req.body;
+  return null;
+}
 
 const wixWebhookController = async (req, res) => {
   // ✅ Always respond 200 first — Wix retries if no response
   res.status(200).json({ success: true });
 
   try {
-    console.log("re______", req.body);
-    let raw;
-    if (Buffer.isBuffer(req.body)) {
-      raw = req.body.toString("utf-8");
-    } else if (req.body?.type === "Buffer" && Array.isArray(req.body.data)) {
-      raw = Buffer.from(req.body.data).toString("utf-8");
-    } else if (typeof req.body === "string") {
-      raw = req.body;
+    let raw = rawBodyString(req);
+
+    // eCommerce order events are money-moving: verified path, then stop.
+    if (raw) {
+      try {
+        const ecom = await handleEcomEvent(raw);
+        if (ecom.handled) return;
+      } catch (e) {
+        console.error("[WIX WEBHOOK] ecom handler error:", e.message);
+        return;
+      }
     }
 
     // ── 2. Decode ────────────────────────────────────────────────────────

@@ -19,6 +19,7 @@ function readUserFromUrl() {
     memberId: params.get("wixMemberId") || "",
     photo: params.get("wixPhoto") || "",
     wixDbId,
+    token: params.get("wixToken") || localStorage.getItem(KEYS.CUSTOMER_TOKEN) || "",
   };
 }
 
@@ -32,6 +33,7 @@ function readUserFromStorage() {
     memberId: localStorage.getItem(KEYS.CUSTOMER_MEMBER) || "",
     photo: localStorage.getItem(KEYS.CUSTOMER_PHOTO) || "",
     wixDbId,
+    token: localStorage.getItem(KEYS.CUSTOMER_TOKEN) || "",
   };
 }
 
@@ -109,6 +111,7 @@ export const WixUserProvider = ({ children }) => {
               lastName,
               memberId,
               photo,
+              token: saved.token || "",
             });
           }
         } catch (err) {

@@ -43,14 +43,15 @@ const walletHistorySchema = new mongoose.Schema({
             "withdraw",
             "refund",
             "credit",
-            "paid"
+            "paid",
+            "voucher_purchase"
         ],
         required: true
     },
 
     referenceType: {
         type: String,
-        enum: ["voice", "chat", "video", "recharge", "manual", "withdraw"],
+        enum: ["voice", "chat", "video", "recharge", "manual", "withdraw", "voucher_purchase"],
         default: null
     },
 

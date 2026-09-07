@@ -3,15 +3,42 @@ const { User } = require("../Modal/userSchema");
 const { shopModel } = require("../Modal/shopify");
 const { default: axios } = require("axios");
 const mongoose = require("mongoose");
+const { signCustomerToken } = require("../MiddleWare/requireCustomer");
+
+const WIX_API = (process.env.WIX_API_BASE || "https://www.wixapis.com").replace(/\/$/, "");
+
+/**
+ * Prove the caller really is this Wix member. The widget calls this endpoint
+ * with fetchWithAuth, so Authorization carries the site member's access token;
+ * Wix's Get My Member answers with the member that token belongs to.
+ * Returns the verified member id, or null (guest / plain fetch / invalid).
+ */
+async function verifyWixMember(authHeader) {
+  const bearer = String(authHeader || "").trim();
+  if (!bearer) return null;
+  try {
+    const { data } = await axios.get(`${WIX_API}/members/v1/members/my`, { params: { fieldsets: "EXTENDED" }, headers: { Authorization: bearer } });
+    return data?.member?.id ? { id: data.member.id, loginEmail: data.member.loginEmail || "" } : null;
+  } catch (err) {
+    console.warn("[CUSTOMER AUTH] member verification failed:", err.response?.status || err.message);
+    return null;
+  }
+}
 
 const wixUserController = async (req, res) => {
   const { wixMemberId, email, firstName, lastName, photo, instanceId } =
     req.body;
-  console.log("📥 wix-user-session:", req.body);
+  console.log("📥 wix-user-session:", { wixMemberId, email, instanceId });
 
   if (!wixMemberId) {
     return res.status(400).json({ error: "wixMemberId required" });
   }
+
+  // Verified identity → session token. Unverified (legacy plain fetch) → no token,
+  // the profile still loads but purchases require a verified session.
+  const verified = await verifyWixMember(req.headers.authorization);
+  const identityOk = Boolean(verified && verified.id === wixMemberId);
+  console.log("[CUSTOMER AUTH]", identityOk ? "member verified with Wix" : "no verified member token (legacy session)", { wixMemberId });
 
   try {
     let record = await User.findOne({ wixMemberId });
@@ -54,11 +81,14 @@ const wixUserController = async (req, res) => {
       console.log("✅ New user created:", record.email);
     }
 
+    const token = identityOk ? signCustomerToken({ userId: record._id, wixMemberId, instanceId: record.instanceId || instanceId || "" }) : null;
     return res.json({
       success: true,
       dbId: record._id.toString(),
       email: record.email,
       name: `${record.fullname || ""} ${record.lastName || ""}`.trim(), // ✅ fullname
+      token,
+      verified: identityOk,
     });
   } catch (err) {
     console.error("❌ wix-user-session error:", err.message);

@@ -41,6 +41,9 @@ const TYPE_META = {
 };
 
 const CREDIT_TYPES = new Set(["recharge", "bonus", "credit", "manual_credit", "refund"]);
+const PENDING_KEY = "consultly_pending_purchase";
+const POLL_MS = 3000;
+const POLL_MAX_MS = 30 * 60 * 1000;
 
 const ICONS = {
   chat: (
@@ -166,6 +169,268 @@ function SignedOut() {
   );
 }
 
+/* ── Voucher store (Buy now → Wix checkout → webhook → credits) ─ */
+
+const authHeaders = (token) => ({ headers: { Authorization: `Bearer ${token}` } });
+
+function purchaseTone(status) {
+  const s = String(status || "").toUpperCase();
+  if (s === "PAID") return "ok";
+  if (s === "PENDING" || s === "PROCESSING") return "warn";
+  if (s === "FAILED" || s === "CANCELLED" || s === "EXPIRED") return "bad";
+  return "neutral";
+}
+
+/**
+ * Credit packs + purchase flow. The backend is the only authority:
+ *   Buy now → POST /api/vouchers/purchase { voucherId }  (price/credits from DB)
+ *   → Wix checkout opens in a NEW TOP-LEVEL TAB (reserved synchronously in the click)
+ *   → this panel polls GET /api/vouchers/purchase/:id until the Wix webhook
+ *     marks it PAID (credits added server-side) / FAILED / CANCELLED.
+ * Nothing here ever adds credits or trusts a redirect.
+ */
+function VoucherStore({ token, voucherData, currency, balance, walletRows, walletState, onWalletChanged }) {
+  const [flow, setFlow] = useState({ state: "idle" }); // idle|creating|awaiting|paid|failed|cancelled|error
+  const [history, setHistory] = useState([]);
+  const [historyState, setHistoryState] = useState("idle");
+  const pollRef = React.useRef(null);
+  const tabRef = React.useRef(null);
+
+  const loadHistory = useCallback(async () => {
+    if (!token) { setHistoryState("noauth"); return; }
+    setHistoryState((s) => (s === "ready" ? s : "loading"));
+    try {
+      const { data } = await axios.get(`${BACKEND}/api/vouchers/purchases`, authHeaders(token));
+      setHistory(Array.isArray(data?.purchases) ? data.purchases : []);
+      setHistoryState("ready");
+    } catch (err) {
+      console.error("[VOUCHER] history failed:", err.response?.data?.message || err.message);
+      setHistoryState(err.response?.status === 401 ? "noauth" : "error");
+    }
+  }, [token]);
+
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  const stopPolling = useCallback(() => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } }, []);
+
+  const settle = useCallback((purchase) => {
+    stopPolling();
+    try { localStorage.removeItem(PENDING_KEY); } catch (e) { /* ignore */ }
+    if (purchase.status === "PAID") {
+      log("Purchase PAID — credits confirmed by server", purchase.purchaseId);
+      setFlow({ state: "paid", purchase });
+      onWalletChanged();
+    } else if (purchase.status === "FAILED") {
+      setFlow({ state: "failed", purchase });
+    } else {
+      setFlow({ state: "cancelled", purchase });
+    }
+    loadHistory();
+  }, [stopPolling, onWalletChanged, loadHistory]);
+
+  const startPolling = useCallback((purchaseId, checkoutUrl, startedAt = Date.now()) => {
+    stopPolling();
+    setFlow({ state: "awaiting", purchaseId, checkoutUrl, since: startedAt });
+    const tick = async () => {
+      try {
+        const { data } = await axios.get(`${BACKEND}/api/vouchers/purchase/${purchaseId}`, authHeaders(token));
+        const p = data?.purchase;
+        if (!p) return;
+        if (["PAID", "FAILED", "CANCELLED", "EXPIRED"].includes(p.status)) { settle(p); return; }
+        if (Date.now() - startedAt > POLL_MAX_MS) { stopPolling(); setFlow((f) => ({ ...f, state: "awaiting", stale: true })); }
+      } catch (err) {
+        if (err.response?.status === 404 || err.response?.status === 401) { stopPolling(); try { localStorage.removeItem(PENDING_KEY); } catch (e) { /* ignore */ } setFlow({ state: "idle" }); }
+      }
+    };
+    tick();
+    pollRef.current = setInterval(tick, POLL_MS);
+  }, [stopPolling, settle, token]);
+
+  // Refresh / return from checkout: resume waiting for the pending purchase.
+  useEffect(() => {
+    if (!token) return;
+    try {
+      const raw = localStorage.getItem(PENDING_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (saved?.purchaseId) { log("Resuming pending purchase", saved.purchaseId); startPolling(saved.purchaseId, saved.checkoutUrl, saved.since || Date.now()); }
+    } catch (e) { /* ignore */ }
+    return stopPolling;
+  }, [token, startPolling, stopPolling]);
+
+  const buy = async (voucher) => {
+    if (flow.state === "creating") return;
+    if (!token) { setFlow({ state: "error", message: "Your sign-in needs to be refreshed before buying. Please reload the page and try again." }); return; }
+    // Reserve the checkout tab synchronously inside the click (popup blockers);
+    // Wix checkout must run top-level, never inside this embedded section.
+    let tab = null;
+    try { tab = window.open("about:blank", "consultly_checkout"); } catch (e) { tab = null; }
+    setFlow({ state: "creating", voucherId: voucher._id });
+    log("Buy now", voucher._id);
+    try {
+      const { data } = await axios.post(`${BACKEND}/api/vouchers/purchase`, { voucherId: voucher._id }, authHeaders(token));
+      if (!data?.success || !data.checkoutUrl) throw new Error(data?.message || "Checkout could not be created");
+      try { localStorage.setItem(PENDING_KEY, JSON.stringify({ purchaseId: data.purchaseId, checkoutUrl: data.checkoutUrl, since: Date.now() })); } catch (e) { /* ignore */ }
+      if (tab && !tab.closed) { tab.location.href = data.checkoutUrl; tabRef.current = tab; try { tab.focus(); } catch (e) { /* ignore */ } }
+      startPolling(data.purchaseId, data.checkoutUrl);
+      if (!tab) setFlow((f) => ({ ...f, popupBlocked: true }));
+    } catch (err) {
+      try { tab?.close(); } catch (e) { /* ignore */ }
+      const body = err.response?.data || {};
+      console.error("[VOUCHER] purchase failed:", body.code || err.message);
+      setFlow({ state: "error", message: body.message || "We could not start the checkout. Please try again." });
+    }
+  };
+
+  const reopen = () => {
+    if (!flow.checkoutUrl) return;
+    const w = window.open(flow.checkoutUrl, "consultly_checkout");
+    if (w) { tabRef.current = w; try { w.focus(); } catch (e) { /* ignore */ } setFlow((f) => ({ ...f, popupBlocked: false })); }
+  };
+
+  const cancel = async () => {
+    if (!flow.purchaseId) return;
+    stopPolling();
+    try { tabRef.current?.close(); } catch (e) { /* ignore */ }
+    try {
+      const { data } = await axios.post(`${BACKEND}/api/vouchers/purchase/${flow.purchaseId}/cancel`, {}, authHeaders(token));
+      settle(data?.purchase || { status: "CANCELLED" });
+    } catch (err) {
+      settle({ status: "CANCELLED" });
+    }
+  };
+
+  const packs = voucherData?.vouchers || [];
+  const otherCredits = (walletRows || []).filter((w) => (CREDIT_TYPES.has(w.transactionType) || w.direction === "credit") && w.transactionType !== "voucher_purchase");
+  const busy = flow.state === "creating" || flow.state === "awaiting";
+
+  return (
+    <div className={styles.stack} role="tabpanel">
+      {/* Flow status panel */}
+      {flow.state !== "idle" && (
+        <section className={`${styles.card} ${styles.flowCard} ${styles[`flow_${flow.state}`] || ""}`} aria-live="polite">
+          {flow.state === "creating" && (<><div className={styles.flowTitle}><span className={styles.spinner} /> Preparing secure checkout…</div><p className={styles.flowText}>You will be taken to the store checkout in a new tab.</p></>)}
+          {flow.state === "awaiting" && (
+            <>
+              <div className={styles.flowTitle}><span className={styles.spinner} /> {flow.stale ? "Still waiting for payment" : "Waiting for payment confirmation"}</div>
+              <p className={styles.flowText}>
+                {flow.popupBlocked
+                  ? "Your browser blocked the checkout tab. Open it with the button below."
+                  : "Complete your payment in the checkout tab. Credits are added automatically once the store confirms the payment — this can take a few seconds after you return."}
+              </p>
+              <div className={styles.flowActions}>
+                <button type="button" className={styles.btnPrimary} onClick={reopen}>{flow.popupBlocked ? "Open checkout" : "Open checkout again"}</button>
+                <button type="button" className={styles.btnGhost} onClick={cancel}>Cancel purchase</button>
+              </div>
+            </>
+          )}
+          {flow.state === "paid" && (<><div className={styles.flowTitle}>Payment confirmed</div><p className={styles.flowText}>{flow.purchase?.credits ? `${money(currency, flow.purchase.credits)} in credits` : "Your credits"} have been added to your wallet.</p><div className={styles.flowActions}><button type="button" className={styles.btnGhost} onClick={() => setFlow({ state: "idle" })}>Done</button></div></>)}
+          {flow.state === "failed" && (<><div className={styles.flowTitle}>Payment failed</div><p className={styles.flowText}>The store reported that the payment was declined or cancelled. No credits were added and you were not charged.</p><div className={styles.flowActions}><button type="button" className={styles.btnGhost} onClick={() => setFlow({ state: "idle" })}>Close</button></div></>)}
+          {flow.state === "cancelled" && (<><div className={styles.flowTitle}>Purchase cancelled</div><p className={styles.flowText}>No credits were added. If you did complete a payment, your credits will still appear once the store confirms it.</p><div className={styles.flowActions}><button type="button" className={styles.btnGhost} onClick={() => setFlow({ state: "idle" })}>Close</button></div></>)}
+          {flow.state === "error" && (<><div className={styles.flowTitle}>Could not start checkout</div><p className={styles.flowText}>{flow.message}</p><div className={styles.flowActions}><button type="button" className={styles.btnGhost} onClick={() => setFlow({ state: "idle" })}>Close</button></div></>)}
+        </section>
+      )}
+
+      {/* Packs */}
+      <section className={styles.card}>
+        <div className={styles.sectionHead}>
+          <h3 className={styles.sectionTitle}>Available credit packages</h3>
+          <span className={styles.sectionHint}>Balance {money(currency, balance)}</span>
+        </div>
+        {!voucherData ? (
+          <Skeleton rows={1} />
+        ) : packs.length === 0 ? (
+          <EmptyState icon="ticket" title="No packs available" text="The store has not published any credit packs yet." />
+        ) : (
+          <div className={styles.packGrid}>
+            {packs.map((v) => {
+              const base = Number(v.totalCoin) || 0;
+              const extra = Number(v.extraCoin) || 0;
+              const price = Number(v.price) || base;
+              const name = v.name || `${money(currency, base)} pack`;
+              const creating = flow.state === "creating" && flow.voucherId === v._id;
+              return (
+                <div key={v._id} className={styles.pack}>
+                  {extra > 0 && <span className={styles.packBadge}>+{money(currency, extra)} bonus</span>}
+                  <span className={styles.packName}>{name}</span>
+                  <span className={styles.packAmount}>{money(currency, base + extra)}</span>
+                  <span className={styles.packTotal}>credits</span>
+                  <span className={styles.packPrice}>{money(currency, price)}</span>
+                  <button type="button" className={styles.packBuy} onClick={() => buy(v)} disabled={busy} aria-label={`Buy ${name} for ${money(currency, price)}`}>
+                    {creating ? "Preparing…" : "Buy now"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {!token && voucherData && packs.length > 0 && (
+          <p className={styles.noteMuted}>Purchases need a verified sign-in. If “Buy now” does not work, reload the page.</p>
+        )}
+      </section>
+
+      {/* Purchase history */}
+      <section className={styles.card}>
+        <div className={styles.sectionHead}>
+          <h3 className={styles.sectionTitle}>Voucher purchase history</h3>
+          <span className={styles.sectionHint}>Confirmed by the store</span>
+        </div>
+        {historyState === "loading" && <Skeleton />}
+        {historyState === "noauth" && <EmptyState icon="lock" title="Sign in to see your purchases" text="Reload the page to refresh your session." />}
+        {historyState === "error" && <EmptyState icon="ticket" title="Could not load your purchases" text="Please try again in a moment." />}
+        {historyState === "ready" && history.length === 0 && <EmptyState icon="ticket" title="No purchases yet" text="Buy a credit pack above to start consulting." />}
+        {historyState === "ready" && history.length > 0 && (
+          <ul className={styles.list}>
+            {history.map((p) => (
+              <li key={p.purchaseId} className={styles.row}>
+                <span className={styles.rowIcon}><Icon name="ticket" /></span>
+                <div className={styles.rowMain}>
+                  <span className={styles.rowTitle}>{p.voucher?.name || "Credit pack"}</span>
+                  <span className={styles.rowSub}>
+                    {formatDateTime(p.paidAt || p.createdAt)}
+                    {p.wixOrderNumber ? ` · Order #${p.wixOrderNumber}` : ""}
+                    {` · ${p.purchaseId}`}
+                  </span>
+                </div>
+                <div className={styles.rowMeta}>
+                  <span className={styles.rowMetaItem}><span className={styles.rowMetaLabel}>Credits</span>{money(currency, p.credits)}</span>
+                  <span className={styles.rowMetaItem}><span className={styles.rowMetaLabel}>Paid</span>{money(p.currency || currency, p.amount)}</span>
+                  <span className={`${styles.status} ${styles[`status_${purchaseTone(p.status)}`]}`}>{p.status === "PAID" ? "Paid" : p.status.charAt(0) + p.status.slice(1).toLowerCase()}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* Other wallet credits (manual/bonus) — only when any exist */}
+      {walletState === "ready" && otherCredits.length > 0 && (
+        <section className={styles.card}>
+          <div className={styles.sectionHead}>
+            <h3 className={styles.sectionTitle}>Other wallet credits</h3>
+            <span className={styles.sectionHint}>Bonuses and adjustments</span>
+          </div>
+          <ul className={styles.list}>
+            {otherCredits.map((w) => (
+              <li key={w._id} className={styles.row}>
+                <span className={styles.rowIcon}><Icon name="wallet" /></span>
+                <div className={styles.rowMain}>
+                  <span className={styles.rowTitle}>{w.description || w.transactionType}</span>
+                  <span className={styles.rowSub}>{formatDate(w.createdAt)}</span>
+                </div>
+                <div className={styles.rowMeta}>
+                  <span className={styles.rowMetaItem}><span className={styles.rowMetaLabel}>Credits</span>+{money(w.currency || currency, w.amount)}</span>
+                  <span className={`${styles.status} ${styles[`status_${statusTone(w.status)}`]}`}>{w.status || w.direction || "—"}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </div>
+  );
+}
+
 /* ── Page ───────────────────────────────────────────────────── */
 
 const ProfileSection = () => {
@@ -241,6 +506,12 @@ const ProfileSection = () => {
     return () => { cancelled = true; };
   }, [userId]);
 
+  const [walletTick, setWalletTick] = useState(0);
+  const refreshWallet = useCallback(() => {
+    if (userId) dispatch(fetchUserDetailsByIds(userId));
+    setWalletTick((n) => n + 1);
+  }, [dispatch, userId]);
+
   // Wallet history (voucher purchases + usage) — existing customer endpoint
   useEffect(() => {
     if (!userId || !shopId) return;
@@ -262,24 +533,10 @@ const ProfileSection = () => {
         setWalletState("error");
       });
     return () => { cancelled = true; };
-  }, [userId, shopId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, shopId, walletTick]);
 
-  // Purchase flow — unchanged from the previous Voucher page
-  const buyVoucher = useCallback(async (voucher) => {
-    const voucherAdminId = voucherData?.id;
-    if (!voucherAdminId) return;
-    try {
-      const response = await axios.post(
-        `${BACKEND}/api/buy-voucher/${voucherAdminId}`,
-        { wixProductId: voucher?.wixProductId },
-      );
-      if (response.status === 200) {
-        window.open(response.data?.data?.productPageUrl, "_blank");
-      }
-    } catch (error) {
-      console.error("[PROFILE] buy-voucher failed:", error.message);
-    }
-  }, [voucherData]);
+  // Purchases live in <VoucherStore/> (server-verified Wix checkout + webhook).
 
   /* ── Derived ─────────────────────────────────────────────── */
 
@@ -318,10 +575,7 @@ const ProfileSection = () => {
     [sessions, typeFilter],
   );
 
-  const purchases = useMemo(
-    () => wallet.filter((w) => CREDIT_TYPES.has(w.transactionType) || w.direction === "credit"),
-    [wallet],
-  );
+
 
   /* ── Render ──────────────────────────────────────────────── */
 
@@ -490,85 +744,15 @@ const ProfileSection = () => {
 
       {/* Vouchers & wallet ─────────────────────────────────── */}
       {tab === "vouchers" && (
-        <div className={styles.stack} role="tabpanel">
-          <section className={styles.card}>
-            <div className={styles.sectionHead}>
-              <h3 className={styles.sectionTitle}>Add credits</h3>
-              <span className={styles.sectionHint}>Balance {money(currency, balance)}</span>
-            </div>
-            {!voucherData ? (
-              <Skeleton rows={1} />
-            ) : (voucherData.vouchers || []).length === 0 ? (
-              <EmptyState icon="ticket" title="No packs available" text="The store has not published any credit packs yet." />
-            ) : (
-              <div className={styles.packGrid}>
-                {voucherData.vouchers.map((v) => {
-                  const base = Number(v.totalCoin) || 0;
-                  const extra = Number(v.extraCoin) || 0;
-                  return (
-                    <button
-                      key={v._id}
-                      type="button"
-                      className={styles.pack}
-                      onClick={() => buyVoucher(v)}
-                      aria-label={`Buy ${currency}${base} pack${extra ? ` with ${currency}${extra} extra` : ""}`}
-                    >
-                      {extra > 0 && <span className={styles.packBadge}>+{currency}{extra} bonus</span>}
-                      <span className={styles.packAmount}>{currency}{base}</span>
-                      <span className={styles.packTotal}>You get {currency}{base + extra}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-
-          <section className={styles.card}>
-            <div className={styles.sectionHead}>
-              <h3 className={styles.sectionTitle}>My vouchers</h3>
-              <span className={styles.sectionHint}>Purchases and credits</span>
-            </div>
-            {walletState === "loading" && <Skeleton />}
-            {walletState === "error" && (
-              <EmptyState icon="ticket" title="Could not load your vouchers" text="Please try again in a moment." />
-            )}
-            {walletState === "ready" && purchases.length === 0 && (
-              <EmptyState icon="ticket" title="No vouchers yet" text="Purchase a credit pack above to start consulting." />
-            )}
-            {walletState === "ready" && purchases.length > 0 && (
-              <ul className={styles.list}>
-                {purchases.map((w) => (
-                  <li key={w._id} className={styles.row}>
-                    <span className={styles.rowIcon}><Icon name="ticket" /></span>
-                    <div className={styles.rowMain}>
-                      <span className={styles.rowTitle}>
-                        {w.description || `${w.transactionType || "credit"} · ${money(w.currency || currency, w.amount)}`}
-                      </span>
-                      <span className={styles.rowSub}>
-                        {formatDate(w.createdAt)}
-                        {w.draftOrderId ? ` · Order ${w.draftOrderId}` : ""}
-                      </span>
-                    </div>
-                    <div className={styles.rowMeta}>
-                      <span className={styles.rowMetaItem}>
-                        <span className={styles.rowMetaLabel}>Credits</span>
-                        +{money(w.currency || currency, w.amount)}
-                      </span>
-                      <span className={`${styles.status} ${styles[`status_${statusTone(w.status)}`]}`}>
-                        {w.status || w.direction || "—"}
-                      </span>
-                      {w.invoiceUrl && (
-                        <a className={styles.link} href={w.invoiceUrl} target="_blank" rel="noreferrer">
-                          Invoice
-                        </a>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        </div>
+        <VoucherStore
+          token={user?.token || ""}
+          voucherData={voucherData}
+          currency={currency}
+          balance={balance}
+          walletRows={wallet}
+          walletState={walletState}
+          onWalletChanged={refreshWallet}
+        />
       )}
     </div>
   );

@@ -20,6 +20,14 @@ webhookRoutes.post(
   wixWebhookController
 );
 
+// ─── eCommerce events (Order Payment Status Updated / Order Approved) ────────
+// Point those webhooks here (or at /api/wix/webhook — same verified handler).
+webhookRoutes.post(
+  "/wix/webhook/ecom",
+  express.raw({ type: "*/*" }),
+  wixWebhookController
+);
+
 webhookRoutes.post(
   "/wix/order-webhook",
   express.raw({ type: "*/*" }),

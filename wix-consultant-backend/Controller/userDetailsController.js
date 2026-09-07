@@ -105,7 +105,7 @@ const getVouchersController = async (req, res) => {
             });
         }
         const vouchers = {
-            vouchers: admin.vouchers,
+            vouchers: (admin.vouchers || []).filter((v) => v.active !== false),
             shopCurrency: admin.currency,
             id: admin._id
         };

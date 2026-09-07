@@ -5409,20 +5409,27 @@ var ConsultantWidget = (() => {
         }
         async _processMember(data, resolve) {
           try {
-            const res = await fetch(`${BACKEND}/api/wix-user-session`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                wixMemberId: data.memberId,
-                email: data.email,
-                firstName: data.firstName || "",
-                lastName: data.lastName || "",
-                photo: data.photo || "",
-                instanceId: this.instanceId
-              })
+            const body = JSON.stringify({
+              wixMemberId: data.memberId,
+              email: data.email,
+              firstName: data.firstName || "",
+              lastName: data.lastName || "",
+              photo: data.photo || "",
+              instanceId: this.instanceId
             });
+            let res;
+            try {
+              res = await withTimeout(
+                wixClient.fetchWithAuth(`${BACKEND}/api/wix-user-session`, { method: "POST", headers: { "Content-Type": "application/json" }, body }),
+                6e3,
+                "wix-user-session(fetchWithAuth)"
+              );
+            } catch (authErr) {
+              console.warn("[WIDGET] fetchWithAuth session failed \u2192 plain fetch:", authErr.message);
+              res = await fetch(`${BACKEND}/api/wix-user-session`, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+            }
             const saved = await res.json();
-            console.log("\u2705 DB save:", saved.dbId);
+            console.log("\u2705 DB save:", saved.dbId, "verified:", Boolean(saved.verified));
             if (saved.dbId) {
               localStorage.setItem("wix_customer_id", saved.dbId);
               ["wix_user_db_id", "client_u_Identity", "user_id", "userId"].forEach(
@@ -5439,7 +5446,8 @@ var ConsultantWidget = (() => {
                 firstName: data.firstName || "",
                 lastName: data.lastName || "",
                 photo: data.photo || "",
-                dbId: saved.dbId
+                dbId: saved.dbId,
+                token: saved.token || ""
               };
             }
           } catch (e) {
@@ -5474,6 +5482,7 @@ var ConsultantWidget = (() => {
             params.set("wixLastName", this.wixMember.lastName || "");
             params.set("wixPhoto", this.wixMember.photo || "");
             params.set("wixDbId", this.wixMember.dbId || "");
+            if (this.wixMember.token) params.set("wixToken", this.wixMember.token);
             console.log("\u2705 Logged in user \u2014 dashboard load hoga");
           } else {
             params.set("wixLoggedIn", "false");

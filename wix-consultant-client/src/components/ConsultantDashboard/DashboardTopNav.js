@@ -13,14 +13,12 @@ import {
 import styles from "./DashboardTopNav.module.css";
 
 /**
- * Compact horizontal navigation for the consultant dashboard.
+ * The one consultant navigation bar: identity | tabs | actions.
  *
- * Replaces the old fixed-position sidebar, which did not work inside the Wix
- * storefront iframe. Tabs collapse into a "More" menu at narrow widths rather
- * than wrapping onto extra rows.
- *
- * Tab order matters: `collapseClass` hides tabs right-to-left as width shrinks,
- * so the least-used tabs move into the More menu first.
+ * Tabs fold into the "More" menu from the right as the viewport narrows
+ * (collapseClass on each item) instead of wrapping. The More menu closes on
+ * outside click and Escape, and lives in normal flow so it works inside the
+ * Wix iframe. The identity block opens the profile modal.
  */
 export default function DashboardTopNav({
   items,
@@ -34,19 +32,14 @@ export default function DashboardTopNav({
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
 
-  // Close the More menu on outside click or Escape.
   useEffect(() => {
     if (!menuOpen) return;
-
     const onPointerDown = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) {
-        setMenuOpen(false);
-      }
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
     };
     const onKeyDown = (e) => {
       if (e.key === "Escape") setMenuOpen(false);
     };
-
     document.addEventListener("mousedown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
     return () => {
@@ -62,24 +55,33 @@ export default function DashboardTopNav({
 
   return (
     <div className={styles.bar}>
-      <div className={styles.identity}>
+      <button
+        type="button"
+        className={styles.identity}
+        onClick={onOpenProfile}
+        title="My profile"
+      >
         <img
           className={styles.avatar}
           src={imageUrl || "/images/flag/teamdefault.png"}
-          alt={displayName || "Consultant"}
+          alt=""
+          onError={(e) => {
+            e.currentTarget.src = "/images/flag/teamdefault.png";
+          }}
         />
-        <div className={styles.identityText}>
-          <span className={styles.welcome}>Welcome</span>
+        <span className={styles.identityText}>
           <span className={styles.name}>{displayName || "Consultant"}</span>
-        </div>
-      </div>
+          <span className={styles.welcome}>Consultant</span>
+        </span>
+      </button>
 
-      <nav className={styles.tabs}>
+      <nav className={styles.tabs} aria-label="Dashboard">
         {items.map((item) => (
           <button
             key={item.path}
             type="button"
             title={item.label}
+            aria-current={item.active ? "page" : undefined}
             onClick={() => go(item.path)}
             className={[
               styles.tab,
@@ -117,9 +119,7 @@ export default function DashboardTopNav({
                   type="button"
                   role="menuitem"
                   onClick={() => go(item.path)}
-                  className={`${styles.menuItem} ${
-                    item.active ? styles.menuItemActive : ""
-                  }`}
+                  className={`${styles.menuItem} ${item.active ? styles.menuItemActive : ""}`}
                 >
                   {item.icon}
                   {item.label}
@@ -138,7 +138,7 @@ export default function DashboardTopNav({
                 }}
               >
                 <HiOutlineUser />
-                My Profile
+                My profile
               </button>
               <button
                 type="button"
@@ -150,7 +150,7 @@ export default function DashboardTopNav({
                 }}
               >
                 <HiOutlineGlobeAlt />
-                View Storefront
+                View storefront
               </button>
               <button
                 type="button"
@@ -162,7 +162,7 @@ export default function DashboardTopNav({
                 }}
               >
                 <HiOutlineArrowLeftOnRectangle />
-                Logout
+                Log out
               </button>
             </div>
           )}
@@ -176,10 +176,17 @@ export default function DashboardTopNav({
           onClick={onViewStorefront}
           title="Browse the public storefront without logging out"
         >
-          View Storefront
+          <HiOutlineGlobeAlt />
+          <span>View storefront</span>
         </button>
-        <button type="button" className={styles.ghostBtn} onClick={onLogout}>
-          Logout
+        <button
+          type="button"
+          className={`${styles.ghostBtn} ${styles.logoutBtn}`}
+          onClick={onLogout}
+          title="Log out"
+        >
+          <HiOutlineArrowLeftOnRectangle />
+          <span>Log out</span>
         </button>
       </div>
     </div>

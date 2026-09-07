@@ -139,8 +139,7 @@ function TabNavigation({ children }) {
       collapseClass: "collapse2",
     },
     {
-      label: "Call Chat Logs",
-      shortLabel: "Call Logs",
+      label: "Call Logs",
       path: "/consultant-dashboard/call-chat-logs",
       active: location.pathname.startsWith(
         "/consultant-dashboard/call-chat-logs",
@@ -149,8 +148,7 @@ function TabNavigation({ children }) {
       collapseClass: "collapse3",
     },
     {
-      label: "Wallet Management",
-      shortLabel: "Wallet",
+      label: "Wallet",
       path: "/consultant-dashboard/consultant-wallet-logs",
       active: location.pathname.startsWith(
         "/consultant-dashboard/consultant-wallet-logs",
@@ -160,8 +158,7 @@ function TabNavigation({ children }) {
     },
 
     {
-      label: "Withdrawal Request",
-      shortLabel: "Withdrawals",
+      label: "Withdrawals",
       // Both the table and the form live under the consultant dashboard; the
       // form stays reachable via the button inside WithdrawalRequestTable.
       path: "/consultant-dashboard/withdrawal-request-table",
@@ -250,7 +247,6 @@ function TabNavigation({ children }) {
       <ConsultantProfileModal
         show={showModal}
         handleClose={() => setShowModal(false)}
-        onLogout={handleLogout}
         consultantOverview={consultantOverview}
         profile={profile}
         setProfile={setProfile}

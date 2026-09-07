@@ -155,63 +155,7 @@ body.wix-embed.wix-embed-dashboard .App {
   z-index: 20;
 }
 
-body.wix-embed.wix-embed-dashboard [class*="dashboardWrapper"] {
-  flex: 1 !important;
-  display: flex !important;
-  flex-direction: column !important;
-  height: auto !important;
-  min-height: 0 !important; /* height comes from ResizeObserver measurement */
-  max-height: none !important;
-  background: #ffffff !important;
-}
-
-body.wix-embed.wix-embed-dashboard .consultant-dashboard-shell [class*="mainContainer"] {
-  flex: 1 !important;
-  min-height: 0 !important;
-  height: auto !important;
-  display: flex !important;
-  position: relative !important;
-  align-self: stretch !important;
-}
-
-body.wix-embed.wix-embed-dashboard .consultant-dashboard-shell [class*="contentArea"] {
-  flex: 1 !important;
-  min-height: 0 !important;
-  display: flex !important;
-  flex-direction: column !important;
-}
-
-body.wix-embed.wix-embed-dashboard .consultant-dashboard-shell [class*="content"] {
-  flex: 1 !important;
-  min-height: 0 !important;
-  overflow-y: auto !important;
-}
-
-body.wix-embed.wix-embed-dashboard .consultant-dashboard-shell [class*="sideNav"] {
-  position: absolute !important;
-  top: 0 !important;
-  left: 0 !important;
-  bottom: 0 !important;
-  height: 100% !important;
-  max-height: none !important;
-}
-
-/* Consultant dashboard → Chats tab */
-body.wix-embed.wix-embed-dashboard .consultant-dashboard-shell [class*="pageContainer"] {
-  flex: 1 !important;
-  display: flex !important;
-  flex-direction: column !important;
-  height: auto !important;
-  min-height: 0 !important;
-  max-height: none !important;
-}
-
-body.wix-embed.wix-embed-dashboard .consultant-dashboard-shell [class*="chatLayout"] {
-  flex: 1 !important;
-  min-height: 480px !important;
-  height: auto !important;
-  max-height: none !important;
-}
+/* Consultant shell flow is handled by TabNavigation.module.css + dashboard-theme.css */
 
 .Polaris-Frame__Content {
   padding: 0 !important;

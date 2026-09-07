@@ -1,133 +1,143 @@
 /*
- * Consultant dashboard top navigation — built for the Wix storefront iframe.
- *
- * Rules followed here:
- *  - no position: fixed (anchors to the iframe viewport, floats over content)
- *  - no 100vh (resolves to iframe height, causes nested scrollbars)
- *  - no hardcoded min-height (creates dead whitespace on the Wix page)
- *  - normal document flow; the iframe grows to fit via sendIframeHeightToParent()
+ * Consultant dashboard top navigation — ONE bar: identity | tabs | actions.
+ * Built for the Wix iframe: no position:fixed, no vh, no min-height.
+ * Tokens come from dashboard-theme.css (.consultant-dashboard-shell).
  */
 
 .bar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
   flex-wrap: nowrap;
   width: 100%;
   box-sizing: border-box;
-  padding: 10px 14px;
+  height: 56px;
+  padding: 0 20px;
   background: var(--cds-surface, #fff);
-  border-bottom: 1px solid var(--cds-border, #e9e9ee);
+  border-bottom: 1px solid var(--cds-border, #e6e8ec);
 }
 
 /* ── Identity ───────────────────────────────────────────────── */
+
 .identity {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   min-width: 0;
   flex-shrink: 1;
+  padding: 4px 8px 4px 0;
+  margin-right: 4px;
+  border: 0;
+  background: none;
+  border-radius: 8px;
+  text-align: left;
+  cursor: pointer;
 }
+
+.identity:hover .name { color: var(--cds-text, #111318); }
 
 .avatar {
   width: 32px;
   height: 32px;
+  flex-shrink: 0;
   border-radius: 50%;
   object-fit: cover;
-  background: #f1f1f4;
-  flex-shrink: 0;
+  background: var(--cds-accent-soft, #eeeff2);
+  border: 1px solid var(--cds-border, #e6e8ec);
 }
 
 .identityText {
   display: flex;
   flex-direction: column;
   min-width: 0;
-}
-
-.welcome {
-  font-size: 9px;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--cds-text-subtle, #8a8a94);
-  line-height: 1.3;
+  line-height: 1.25;
 }
 
 .name {
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 600;
-  color: var(--cds-text, #1a1a1f);
-  line-height: 1.3;
+  color: var(--cds-text, #111318);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 160px;
+  max-width: 180px;
+}
+
+.welcome {
+  font-size: 11.5px;
+  color: var(--cds-text-subtle, #9096a3);
 }
 
 /* ── Tabs ───────────────────────────────────────────────────── */
+
 .tabs {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   margin-left: auto;
   min-width: 0;
+  height: 100%;
 }
 
 .tab {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  border: 1px solid transparent;
+  gap: 7px;
+  height: 56px;
+  padding: 0 12px;
+  border: 0;
   background: none;
-  border-radius: 8px;
-  padding: 7px 12px;
-  font-size: 13px;
-  color: var(--cds-text-muted, #55555f);
-  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--cds-text-muted, #666b78);
   white-space: nowrap;
-  transition: background 0.15s, color 0.15s;
+  transition: color 0.15s ease;
 }
 
-.tab:hover {
-  background: #f4f4f7;
-  color: var(--cds-text, #1a1a1f);
-}
-
-.tabActive {
-  background: var(--cds-text, #1a1a1f);
-  color: var(--cds-surface, #fff);
-}
-
-.tabActive:hover {
-  background: var(--cds-text, #1a1a1f);
-  color: var(--cds-surface, #fff);
-}
+.tab:hover { color: var(--cds-text, #111318); }
 
 .tabIcon {
   display: inline-flex;
-  font-size: 15px;
+  font-size: 16px;
 }
 
-/* ── Overflow "More" menu ───────────────────────────────────── */
+/* Active: weight + colour + a 2px rule on the bar's bottom border */
+.tabActive {
+  color: var(--cds-text, #111318);
+  font-weight: 600;
+}
+
+.tabActive::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--cds-accent, #16181d);
+  border-radius: 2px 2px 0 0;
+}
+
+/* ── More menu ──────────────────────────────────────────────── */
+
 .moreWrap {
   position: relative;
-  display: none; /* only shown when tabs are collapsed */
+  display: none; /* shown only once tabs start collapsing */
 }
 
-.moreOpen {
-  background: #f4f4f7;
-  color: var(--cds-text, #1a1a1f);
-}
+.moreOpen { color: var(--cds-text, #111318); }
 
 .menu {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + 4px);
   right: 0;
-  min-width: 208px;
-  background: var(--cds-surface, #fff);
-  border: 1px solid var(--cds-border, #e4e4ea);
-  border-radius: 10px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+  min-width: 216px;
   padding: 6px;
+  background: var(--cds-surface, #fff);
+  border: 1px solid var(--cds-border, #e6e8ec);
+  border-radius: 10px;
+  box-shadow: var(--cds-shadow-lift, 0 8px 24px -8px rgba(16, 24, 40, 0.16));
   z-index: 40;
 }
 
@@ -136,89 +146,106 @@
   align-items: center;
   gap: 9px;
   width: 100%;
-  border: none;
+  padding: 8px 10px;
+  border: 0;
   background: none;
   border-radius: 7px;
-  padding: 9px 11px;
   font-size: 13px;
-  color: #33333b;
-  cursor: pointer;
+  color: var(--cds-text, #111318);
   text-align: left;
 }
 
-.menuItem:hover {
-  background: #f4f4f7;
-}
+.menuItem svg { font-size: 15px; color: var(--cds-text-muted, #666b78); }
+.menuItem:hover { background: var(--cds-hover, #f2f3f5); }
 
 .menuItemActive {
-  background: #f0f0f4;
+  background: var(--cds-accent-soft, #eeeff2);
   font-weight: 600;
-  color: var(--cds-text, #1a1a1f);
 }
 
 .menuDivider {
   height: 1px;
-  background: var(--cds-border, #ececf1);
   margin: 5px 4px;
+  background: var(--cds-border, #e6e8ec);
 }
 
+.dangerItem { color: var(--cds-danger, #b42318); }
+.dangerItem svg { color: inherit; }
+.dangerItem:hover { background: var(--cds-danger-soft, #fef3f2); }
+
 /* ── Right-hand actions ─────────────────────────────────────── */
+
 .actions {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+  padding-left: 12px;
+  border-left: 1px solid var(--cds-border, #e6e8ec);
 }
 
 .ghostBtn {
-  border: 1px solid #dededf;
-  background: var(--cds-surface, #fff);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 11px;
+  border: 1px solid transparent;
+  background: transparent;
   border-radius: 8px;
-  padding: 7px 12px;
   font-size: 12.5px;
-  color: #44444d;
-  cursor: pointer;
+  font-weight: 500;
+  color: var(--cds-text-muted, #666b78);
   white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
+
+.ghostBtn svg { font-size: 15px; }
 
 .ghostBtn:hover {
-  background: #f7f7f9;
-  border-color: #c9c9cf;
+  background: var(--cds-hover, #f2f3f5);
+  color: var(--cds-text, #111318);
 }
 
-.dangerItem {
-  color: var(--cds-danger, #b4231d);
+.storefrontBtn {
+  border-color: var(--cds-border-strong, #d2d5dc);
+  color: var(--cds-text, #111318);
+  background: var(--cds-surface, #fff);
 }
 
-.dangerItem:hover {
-  background: #fdf0ef;
+.logoutBtn:hover {
+  color: var(--cds-danger, #b42318);
+  background: var(--cds-danger-soft, #fef3f2);
 }
 
 /*
- * Responsive: collapse tabs into the More menu rather than wrapping onto
- * a second row. Each breakpoint hides the tabs that no longer fit.
+ * Responsive: tabs fold into More from the right rather than wrapping.
+ * collapse4 → Wallet + Withdrawals, collapse3 → Call Logs, collapse2 → Chats,
+ * collapse1 → Dashboard.
  */
-@media (max-width: 980px) {
+@media (max-width: 1080px) {
   .collapse4 { display: none; }
   .moreWrap { display: block; }
 }
 
-@media (max-width: 830px) {
+@media (max-width: 900px) {
   .collapse3 { display: none; }
+  .storefrontBtn { display: none; } /* available inside More */
 }
 
-@media (max-width: 680px) {
+@media (max-width: 720px) {
   .collapse2 { display: none; }
-  .storefrontBtn { display: none; } /* moves into the More menu */
+  .bar { padding: 0 14px; gap: 10px; }
 }
 
 @media (max-width: 560px) {
   .collapse1 { display: none; }
+  .logoutBtn span { display: none; }
+  .logoutBtn { padding: 7px; }
   .welcome { display: none; }
-  .name { max-width: 96px; }
+  .name { max-width: 120px; }
 }
 
-@media (max-width: 420px) {
-  .bar { padding: 9px 10px; gap: 8px; }
+@media (max-width: 400px) {
   .identityText { display: none; }
+  .actions { padding-left: 8px; }
 }

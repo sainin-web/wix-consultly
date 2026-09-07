@@ -1,81 +1,225 @@
 /*
- * Consultant dashboard design language.
+ * Consultant dashboard design language — the ONLY stylesheet for the
+ * consultant shell and its pages (plus two small CSS modules for the top nav
+ * and the chat pane, which reuse these tokens).
  *
- * WHY THIS IS A PLAIN STYLESHEET, NOT A COMPONENT:
- * The dashboard has seven pages, each with its own CSS module. Giving them a
- * shared look by editing all seven — or by wrapping them in new layout
- * components — would duplicate UI and create exactly the layered-navigation
- * mess we just removed. Instead these rules are scoped under
- * `.consultant-dashboard-shell`, so every page inherits one design language
- * without a single new wrapper component.
+ * Scoped under `.consultant-dashboard-shell` so nothing here reaches the
+ * public storefront or the admin.
  *
- * IFRAME CONTRACT: no `position: fixed`, no `vh` units, no hardcoded page
- * heights. Content flows naturally so sendIframeHeightToParent() can measure a
- * true height and the Wix iframe grows or shrinks to fit.
+ * Scale
+ *   spacing 4 / 8 / 12 / 16 / 24 / 32
+ *   radius  8 (controls) 10 (cards)
+ *   type    11 label · 12.5 secondary · 13.5 body · 15 section · 20 page · 24 metric
+ *
+ * IFRAME CONTRACT: no position:fixed, no vh units, no page-level fixed
+ * heights. Content flows so sendIframeHeightToParent() measures a true
+ * height. The single intentional exception is the chat pane (see
+ * ChatsPage.module.css), whose message list must scroll internally.
  */
 
 .consultant-dashboard-shell {
-  /* Type */
-  --cds-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
+  --cds-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 
-  /* Surfaces */
-  --cds-bg: #f7f7f9;
+  --cds-bg: #f6f7f9;
   --cds-surface: #ffffff;
   --cds-surface-alt: #fafafb;
+  --cds-hover: #f2f3f5;
 
-  /* Ink */
-  --cds-text: #1a1a1f;
-  --cds-text-muted: #6b6b76;
-  --cds-text-subtle: #93939e;
+  --cds-text: #111318;
+  --cds-text-muted: #666b78;
+  --cds-text-subtle: #9096a3;
 
-  /* Lines */
-  --cds-border: #e7e7ed;
-  --cds-border-strong: #d6d6de;
+  --cds-border: #e6e8ec;
+  --cds-border-strong: #d2d5dc;
 
-  /* Accents */
-  --cds-accent: #1a1a1f;
+  /* One accent (ink) + semantic tones */
+  --cds-accent: #16181d;
   --cds-accent-ink: #ffffff;
-  --cds-danger: #b4231d;
-  --cds-success: #1f7a4d;
-  --cds-warning: #9a6b08;
+  --cds-accent-soft: #eeeff2;
+  --cds-success: #067647;
+  --cds-success-soft: #ecfdf3;
+  --cds-warning: #b54708;
+  --cds-warning-soft: #fffaeb;
+  --cds-danger: #b42318;
+  --cds-danger-soft: #fef3f2;
 
-  /* Rhythm — one radius/shadow scale for every page */
+  --cds-radius-sm: 8px;
   --cds-radius: 10px;
-  --cds-radius-sm: 7px;
-  --cds-gap: 14px;
-  --cds-shadow: 0 1px 2px rgba(18, 18, 26, 0.05);
-  --cds-shadow-lift: 0 4px 14px rgba(18, 18, 26, 0.09);
+  --cds-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --cds-shadow-lift: 0 8px 24px -8px rgba(16, 24, 40, 0.16);
 
   font-family: var(--cds-font);
   color: var(--cds-text);
   background: var(--cds-bg);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* ── Typography scale ───────────────────────────────────────── */
-.consultant-dashboard-shell h1 { font-size: 20px; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 4px; }
-.consultant-dashboard-shell h2 { font-size: 17px; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 4px; }
-.consultant-dashboard-shell h3 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
-.consultant-dashboard-shell h4 { font-size: 13.5px; font-weight: 600; margin: 0 0 4px; }
-.consultant-dashboard-shell p  { font-size: 13.5px; line-height: 1.55; color: var(--cds-text-muted); }
+/* ── Typography ─────────────────────────────────────────────── */
 
+.consultant-dashboard-shell h1 { font-size: 20px; font-weight: 650; letter-spacing: -0.02em; margin: 0; }
+.consultant-dashboard-shell h2 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+.consultant-dashboard-shell h3 { font-size: 13.5px; font-weight: 600; margin: 0; }
+.consultant-dashboard-shell p  { font-size: 13.5px; line-height: 1.55; color: var(--cds-text-muted); margin: 0; }
+
+/* ── Page header (one per page) ─────────────────────────────── */
+
+.consultant-dashboard-shell .cds-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.consultant-dashboard-shell .cds-page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.consultant-dashboard-shell .cds-page-head p { margin-top: 3px; }
+
+.consultant-dashboard-shell .cds-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--cds-text-muted);
+  cursor: pointer;
+}
+
+.consultant-dashboard-shell .cds-back:hover { color: var(--cds-text); }
 
 /* ── Cards ──────────────────────────────────────────────────── */
+
 .consultant-dashboard-shell .cds-card {
+  background: var(--cds-surface);
+  border: 1px solid var(--cds-border);
   border-radius: var(--cds-radius);
   box-shadow: var(--cds-shadow);
-  border: 1px solid var(--cds-border);
-  background: var(--cds-surface);
   box-sizing: border-box;
 }
 
-/* ── Buttons ────────────────────────────────────────────────── */
+.consultant-dashboard-shell .cds-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--cds-border);
+}
+
+.consultant-dashboard-shell .cds-card-head p { margin-top: 2px; font-size: 12.5px; }
+
+.consultant-dashboard-shell .cds-card-body { padding: 16px; }
+
+/* ── Metric cards ───────────────────────────────────────────── */
+
+.consultant-dashboard-shell .cds-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.consultant-dashboard-shell .cds-metric {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  background: var(--cds-surface);
+  border: 1px solid var(--cds-border);
+  border-radius: var(--cds-radius);
+  box-shadow: var(--cds-shadow);
+}
+
+.consultant-dashboard-shell .cds-metric-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--cds-text-muted);
+}
+
+.consultant-dashboard-shell .cds-metric-value {
+  margin-top: 4px;
+  font-size: 24px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: var(--cds-text);
+  overflow-wrap: anywhere;
+}
+
+.consultant-dashboard-shell .cds-metric-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--cds-text-subtle);
+}
+
+.consultant-dashboard-shell .cds-metric-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: var(--cds-radius-sm);
+  background: var(--cds-accent-soft);
+  color: var(--cds-text);
+  font-size: 16px;
+}
+
+.consultant-dashboard-shell .cds-metric-icon--success { background: var(--cds-success-soft); color: var(--cds-success); }
+
+.consultant-dashboard-shell .cds-skeleton {
+  display: inline-block;
+  width: 64px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--cds-hover);
+}
+
+/* Balance hero (Wallet / Withdraw) */
+.consultant-dashboard-shell .cds-balance {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 18px 20px;
+  background: var(--cds-accent);
+  color: var(--cds-accent-ink);
+  border-radius: var(--cds-radius);
+}
+
+.consultant-dashboard-shell .cds-balance-label {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.consultant-dashboard-shell .cds-balance-value {
+  margin-top: 4px;
+  font-size: 28px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+/* ── Buttons — one system ───────────────────────────────────── */
+
 .consultant-dashboard-shell button {
   font-family: var(--cds-font);
-  font-size: 13px;
-  border-radius: var(--cds-radius-sm);
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .consultant-dashboard-shell button:focus-visible {
@@ -88,11 +232,82 @@
   cursor: not-allowed;
 }
 
-/* ── Tables ─────────────────────────────────────────────────── */
+.consultant-dashboard-shell .cds-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--cds-radius-sm);
+  border: 1px solid var(--cds-border-strong);
+  background: var(--cds-surface);
+  color: var(--cds-text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.consultant-dashboard-shell .cds-btn:hover { background: var(--cds-hover); }
+
+.consultant-dashboard-shell .cds-btn--primary {
+  background: var(--cds-accent);
+  border-color: var(--cds-accent);
+  color: var(--cds-accent-ink);
+}
+
+.consultant-dashboard-shell .cds-btn--primary:hover { background: #2a2d35; }
+
+.consultant-dashboard-shell .cds-btn--danger {
+  color: var(--cds-danger);
+  border-color: var(--cds-border-strong);
+}
+
+.consultant-dashboard-shell .cds-btn--danger:hover {
+  background: var(--cds-danger-soft);
+  border-color: #f4b4ae;
+}
+
+.consultant-dashboard-shell .cds-btn--ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--cds-text-muted);
+}
+
+.consultant-dashboard-shell .cds-btn--ghost:hover { background: var(--cds-hover); color: var(--cds-text); }
+
+.consultant-dashboard-shell .cds-btn--sm { padding: 6px 10px; font-size: 12.5px; }
+
+.consultant-dashboard-shell .cds-btn--on-dark {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.consultant-dashboard-shell .cds-btn--on-dark:hover { background: rgba(255, 255, 255, 0.2); }
+
+.consultant-dashboard-shell .cds-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 16px;
+  margin-top: 16px;
+  border-top: 1px solid var(--cds-border);
+}
+
+/* ── Tables — one system ────────────────────────────────────── */
+
+.consultant-dashboard-shell .cds-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
 .consultant-dashboard-shell table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 13.5px;
   background: var(--cds-surface);
 }
 
@@ -100,41 +315,156 @@
   text-align: left;
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.045em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--cds-text-subtle);
+  color: var(--cds-text-muted);
   background: var(--cds-surface-alt);
-  padding: 10px 12px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--cds-border);
   white-space: nowrap;
 }
 
 .consultant-dashboard-shell tbody td {
-  padding: 11px 12px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--cds-border);
   color: var(--cds-text);
   vertical-align: middle;
 }
 
 .consultant-dashboard-shell tbody tr:last-child td { border-bottom: none; }
-.consultant-dashboard-shell tbody tr:hover { background: var(--cds-surface-alt); }
+.consultant-dashboard-shell tbody tr:hover td { background: var(--cds-surface-alt); }
 
-/*
- * Wide tables scroll horizontally inside their own container, so the dashboard
- * page itself never scrolls sideways inside the Wix iframe.
- */
-.consultant-dashboard-shell .cds-table-wrap {
-  width: 100%;
-  overflow-x: auto;
-  border: 1px solid var(--cds-border);
-  border-radius: var(--cds-radius);
-  background: var(--cds-surface);
+.consultant-dashboard-shell .cds-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.consultant-dashboard-shell .cds-strong { font-weight: 600; }
+.consultant-dashboard-shell .cds-muted { color: var(--cds-text-muted); }
+.consultant-dashboard-shell .cds-plus { color: var(--cds-success); font-weight: 600; }
+.consultant-dashboard-shell .cds-minus { color: var(--cds-danger); font-weight: 600; }
+
+.consultant-dashboard-shell .cds-entity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
+.consultant-dashboard-shell .cds-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--cds-accent-soft);
+  color: var(--cds-text);
+  font-size: 12px;
+  font-weight: 600;
+  object-fit: cover;
+  overflow: hidden;
+}
+
+.consultant-dashboard-shell .cds-entity-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.consultant-dashboard-shell .cds-entity-sub {
+  font-size: 12px;
+  color: var(--cds-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.consultant-dashboard-shell .cds-table-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--cds-border);
+  font-size: 12.5px;
+  color: var(--cds-text-muted);
+}
+
+.consultant-dashboard-shell .cds-pager { display: flex; gap: 6px; }
+
+/* Mobile: rows become stacked cards using data-label */
+@media (max-width: 640px) {
+  .consultant-dashboard-shell .cds-table--cards thead { display: none; }
+  .consultant-dashboard-shell .cds-table--cards tbody tr {
+    display: grid;
+    gap: 6px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--cds-border);
+  }
+  .consultant-dashboard-shell .cds-table--cards tbody tr:hover td { background: transparent; }
+  .consultant-dashboard-shell .cds-table--cards tbody td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0;
+    border: 0;
+    font-size: 13px;
+  }
+  .consultant-dashboard-shell .cds-table--cards tbody td::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--cds-text-subtle);
+  }
+  .consultant-dashboard-shell .cds-table--cards tbody td:first-child { font-weight: 600; }
+}
+
+/* ── Status pills — one system ──────────────────────────────── */
+
+.consultant-dashboard-shell .cds-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--cds-accent-soft);
+  color: var(--cds-text-muted);
+}
+
+.consultant-dashboard-shell .cds-pill--success { background: var(--cds-success-soft); color: var(--cds-success); }
+.consultant-dashboard-shell .cds-pill--warning { background: var(--cds-warning-soft); color: var(--cds-warning); }
+.consultant-dashboard-shell .cds-pill--danger  { background: var(--cds-danger-soft);  color: var(--cds-danger); }
+
 /* ── Forms ──────────────────────────────────────────────────── */
-.consultant-dashboard-shell input,
+
+.consultant-dashboard-shell .cds-field { display: grid; gap: 6px; }
+
+.consultant-dashboard-shell label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--cds-text);
+}
+
+.consultant-dashboard-shell .cds-hint {
+  font-size: 12px;
+  color: var(--cds-text-muted);
+}
+
+.consultant-dashboard-shell .cds-error {
+  font-size: 12.5px;
+  color: var(--cds-danger);
+}
+
+.consultant-dashboard-shell input:not([type="checkbox"]):not([type="file"]),
 .consultant-dashboard-shell select,
 .consultant-dashboard-shell textarea {
+  width: 100%;
   font-family: var(--cds-font);
   font-size: 13.5px;
   color: var(--cds-text);
@@ -151,47 +481,118 @@
 .consultant-dashboard-shell textarea:focus {
   outline: none;
   border-color: var(--cds-accent);
-  box-shadow: 0 0 0 3px rgba(26, 26, 31, 0.08);
+  box-shadow: 0 0 0 3px rgba(22, 24, 29, 0.1);
 }
 
-.consultant-dashboard-shell label {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--cds-text);
+.consultant-dashboard-shell .cds-input-prefix {
+  position: relative;
 }
 
-/* ── Empty states ───────────────────────────────────────────── */
-.consultant-dashboard-shell .cds-empty {
-  text-align: center;
-  color: var(--cds-text-muted);
+.consultant-dashboard-shell .cds-input-prefix > span {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
   font-size: 13.5px;
-  /* Compact by design: an empty page must not inflate the iframe. */
-  padding: 30px 18px;
-  background: var(--cds-surface);
-  border: 1px dashed var(--cds-border-strong);
-  border-radius: var(--cds-radius);
+  color: var(--cds-text-muted);
+  pointer-events: none;
 }
 
-/* ── Status pills ───────────────────────────────────────────── */
-.consultant-dashboard-shell .cds-pill {
+.consultant-dashboard-shell .cds-input-prefix > input { padding-left: 28px; }
+
+.consultant-dashboard-shell .cds-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 640px) {
+  .consultant-dashboard-shell .cds-form-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Empty / loading ────────────────────────────────────────── */
+
+.consultant-dashboard-shell .cds-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 32px 16px;
+  text-align: center;
+}
+
+.consultant-dashboard-shell .cds-empty-icon {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: 11.5px;
-  font-weight: 600;
-  border-radius: 999px;
-  padding: 3px 9px;
-  white-space: nowrap;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 6px;
+  border-radius: 50%;
+  background: var(--cds-accent-soft);
+  color: var(--cds-text-subtle);
+  font-size: 16px;
 }
 
-/* ── Iframe safety net ──────────────────────────────────────── */
-/* Nothing inside the dashboard may pin itself to the iframe viewport or force a
- * viewport-derived height — both break embedding. */
-.consultant-dashboard-shell { overflow-x: hidden; }
+.consultant-dashboard-shell .cds-empty-title { font-size: 14px; font-weight: 600; color: var(--cds-text); }
+.consultant-dashboard-shell .cds-empty-text { font-size: 13px; color: var(--cds-text-muted); max-width: 40ch; }
+
+.consultant-dashboard-shell .cds-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px 16px;
+  font-size: 13px;
+  color: var(--cds-text-muted);
+}
+
+.consultant-dashboard-shell .cds-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--cds-border);
+  border-top-color: var(--cds-text);
+  border-radius: 50%;
+  animation: cdsSpin 0.7s linear infinite;
+}
+
+@keyframes cdsSpin { to { transform: rotate(360deg); } }
+
+/* ── Description list ───────────────────────────────────────── */
+
+.consultant-dashboard-shell .cds-dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0 24px;
+  margin: 0;
+}
+
+.consultant-dashboard-shell .cds-dl > div { display: contents; }
+
+.consultant-dashboard-shell .cds-dl dt,
+.consultant-dashboard-shell .cds-dl dd {
+  margin: 0;
+  padding: 9px 0;
+  border-top: 1px solid var(--cds-border);
+  font-size: 13.5px;
+}
+
+.consultant-dashboard-shell .cds-dl > div:first-child dt,
+.consultant-dashboard-shell .cds-dl > div:first-child dd { border-top: 0; padding-top: 0; }
+
+.consultant-dashboard-shell .cds-dl dt { color: var(--cds-text-muted); }
+.consultant-dashboard-shell .cds-dl dd { font-weight: 600; text-align: right; }
+
+/* ── Responsive ─────────────────────────────────────────────── */
+
+@media (max-width: 1024px) {
+  .consultant-dashboard-shell .cds-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 @media (max-width: 640px) {
   .consultant-dashboard-shell h1 { font-size: 18px; }
-  .consultant-dashboard-shell h2 { font-size: 16px; }
+  .consultant-dashboard-shell .cds-metrics { grid-template-columns: 1fr; }
+  .consultant-dashboard-shell .cds-balance-value { font-size: 24px; }
   .consultant-dashboard-shell thead th,
-  .consultant-dashboard-shell tbody td { padding: 9px 10px; }
+  .consultant-dashboard-shell tbody td { padding: 10px 12px; }
 }

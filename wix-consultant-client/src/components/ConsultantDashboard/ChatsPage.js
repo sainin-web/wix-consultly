@@ -516,7 +516,7 @@ const ChatsPage = () => {
                     }}
                   >
                     {" "}
-                    <span style={{ color: "#63ba77" }}> New Request</span> (
+                    <span style={{ color: "#067647" }}> New requests</span> (
                     {isRequestModalOpen.length})
                   </p>
                 )}
@@ -584,21 +584,13 @@ const ChatsPage = () => {
                                 >
                                   <button
                                     type="button"
-                                    style={{
-                                      padding: "5px 12px",
-                                      backgroundColor: "green",
-                                      color: "#fff",
-                                      border: "none",
-                                      borderRadius: "4px",
-                                      cursor: "pointer",
-                                      fontSize: "12px",
-                                    }}
+                                    className={styles.acceptBtn}
                                     onClick={() => {
                                       updateUser(conversation);
                                       setShowRequestModal(!showRequestModal);
                                     }}
                                   >
-                                    add
+                                    Accept
                                   </button>
                                   <button
                                     type="button"
@@ -899,18 +891,7 @@ const ChatsPage = () => {
                             Timer: {minutes}:{remainingSeconds}
                           </p>
                           <div>
-                            <button
-                              onClick={stopChatTimer}
-                              style={{
-                                padding: "5px 12px",
-                                backgroundColor: "#ff4d4f",
-                                color: "#fff",
-                                border: "none",
-                                borderRadius: "4px",
-                                cursor: "pointer",
-                                fontSize: "13px",
-                              }}
-                            >
+                            <button onClick={stopChatTimer} className={styles.dangerBtn}>
                               Stop Chat
                             </button>
                           </div>

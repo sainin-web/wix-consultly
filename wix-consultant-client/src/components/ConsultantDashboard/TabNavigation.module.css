@@ -1,278 +1,51 @@
-/* Dashboard Wrapper — content height for Wix iframe (no 100vh loop) */
+/*
+ * Consultant dashboard shell layout. Visual rules live in
+ * src/css/dashboard-theme.css; this module only positions the three boxes
+ * (wrapper → main → content) and flows with content for the Wix iframe.
+ * No min-height, no vh, no overflow-y on the content box.
+ */
+
 .dashboardWrapper {
-    /* No min-height: the iframe height is measured from real content. */
-    height: auto;
-    background-color: #f5f6fa;
-    /* font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-        'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-        sans-serif; */
-    padding: 0;
-    position: relative;
-    /* border: 1px solid blue; */
-    /* margin-top: 10px; */
+  display: flex;
+  flex-direction: column;
+  height: auto;
+  position: relative;
+  background: var(--cds-bg, #f6f7f9);
 }
 
-/* Wix iframe: flow naturally and let the parent iframe be resized to fit.
- * height:100% was removed — it forced the panel to the iframe's current height
- * rather than its content, which produced blank space and inner scrollbars. */
 .dashboardEmbed {
-    display: flex;
-    flex-direction: column;
-    height: auto;
-    background-color: #ffffff;
-    box-sizing: border-box;
+  box-sizing: border-box;
 }
 
-.dashboardEmbed .mainContainer {
-    flex: 1;
-    min-height: 0;
-    position: relative;
-    display: flex;
-    align-self: stretch;
-    width: 100%;
-}
-
-.dashboardEmbed .contentArea {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-}
-
-/* No overflow-y here: the page must grow so sendIframeHeightToParent() can
- * report a real height. An inner scroll region would hide content instead. */
-.dashboardEmbed .content {
-    flex: 1;
-    min-width: 0;
-}
-
-/* Video Call Mode - Full Screen */
-.dashboardWrapper.videoCallMode {
-    padding: 0;
-    background-color: #000;
-}
-
-.dashboardWrapper.videoCallMode .mainContainer {
-    max-width: 100%;
-    margin: 0;
-    gap: 0;
-    background: transparent;
-    border-radius: 0;
-}
-
-.dashboardWrapper.videoCallMode .contentArea {
-    width: 100%;
-    margin-left: 0;
-    background: transparent;
-    border-radius: 0;
-    /* border: 1px solid red; */
-}
-
-.dashboardWrapper.videoCallMode .content {
-    padding: 0;
-    background: transparent;
-    border-radius: 0;
-}
-
-@keyframes fadeIn {
-    from {
-        opacity: 0;
-    }
-
-    to {
-        opacity: 1;
-    }
-}
-
-/* Main Container */
 .mainContainer {
-    max-width: 100%;
-    margin: 0 auto;
-    display: flex;
-    background: white;
-    border-radius: 0;
-    box-shadow: none;
-    min-height: 0;
-    height: auto;
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  height: auto;
 }
 
-/* Content Area
- * margin-left: 260px removed — it compensated for the fixed sidebar, which no
- * longer exists. Inside the Wix iframe it produced a permanent blank gutter. */
 .contentArea {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    background: white;
-    border-radius: 0;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
-/* Content
- * overflow-y: auto removed — it created a scroll region inside the iframe's own
- * scroll region (nested scrollbars). Content now flows and the iframe is resized
- * to fit by sendIframeHeightToParent(). */
 .content {
-    flex: 1;
-    min-width: 0;
-    padding: 20px;
-    background: white;
+  flex: 1;
+  min-width: 0;
+  padding: 24px;
+  box-sizing: border-box;
 }
 
-/* Welcome Section */
-.welcomeSection {
-    margin-top: 0;
-}
+/* Video call route: edge-to-edge, dark */
+.dashboardWrapper.videoCallMode { background: #000; }
+.dashboardWrapper.videoCallMode .content { padding: 0; }
 
-.welcomeCard {
-    background: white;
-    border-radius: 20px;
-    padding: 48px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
-    text-align: center;
-    border: 1px solid #e9ecef;
-    transition: all 0.3s ease;
-}
-
-.welcomeCard:hover {
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
-    transform: translateY(-2px);
-}
-
-.welcomeCard h2 {
-    font-size: 32px;
-    font-weight: 700;
-    color: #212529;
-    margin-bottom: 16px;
-}
-
-.welcomeCard p {
-    font-size: 16px;
-    color: #6c757d;
-    margin: 0;
-    line-height: 1.6;
-}
-
-/* Overlay for mobile */
-.overlay {
-    display: none;
-}
-
-/* Responsive Design - Large Tablet */
-@media (max-width: 1200px) {
-
-    .mainContainer {
-        gap: 20px;
-    }
-
-    .contentArea {
-        margin-left: 0; /* sidebar removed */
-        /* 240px sidebar + 20px gap */
-    }
-
-}
-
-/* Responsive Design - Tablet */
-@media (max-width: 1024px) {
-
-    .mainContainer {
-        gap: 16px;
-    }
-
-    .contentArea {
-        margin-left: 0; /* sidebar removed */
-        /* 240px sidebar + 16px gap */
-    }
-
-    .content {
-        padding: 24px;
-    }
-
-}
-
-/* Responsive Design - Mobile */
 @media (max-width: 768px) {
-
-    .mainContainer {
-        flex-direction: column;
-        gap: 0;
-    }
-
-    .contentArea {
-        margin-left: 0;
-        border-radius: 12px;
-        width: 100%;
-    }
-
-    .content {
-        padding: 20px;
-    }
-
-    .contentArea {
-        border-radius: 0 0 12px 12px;
-    }
-
-    .content {
-        padding: 20px;
-    }
-
-    .welcomeCard {
-        padding: 32px 20px;
-        border-radius: 16px;
-    }
-
-    .welcomeCard h2 {
-        font-size: 24px;
-    }
-
+  .content { padding: 16px; }
 }
 
-/* Responsive Design - Small Mobile */
-@media (max-width: 576px) {
-
-    .contentArea {
-        border-radius: 8px;
-    }
-
-    .content {
-        padding: 16px;
-    }
-
-    .contentArea {
-        border-radius: 0 0 8px 8px;
-    }
-
-    .content {
-        padding: 16px;
-    }
-
-    .welcomeCard {
-        padding: 24px 16px;
-    }
-
-    .welcomeCard h2 {
-        font-size: 20px;
-    }
-
-    .welcomeCard p {
-        font-size: 14px;
-    }
-
-}
-
-.content::-webkit-scrollbar {
-    width: 8px;
-}
-
-.content::-webkit-scrollbar-track {
-    background: #f1f1f1;
-}
-
-.content::-webkit-scrollbar-thumb {
-    background: #c1c1c1;
-    border-radius: 4px;
-}
-
-.content::-webkit-scrollbar-thumb:hover {
-    background: #a8a8a8;
+@media (max-width: 480px) {
+  .content { padding: 12px; }
 }

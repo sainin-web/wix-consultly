@@ -142,7 +142,28 @@ async function handleOrderEvent({ eventId, eventType, instanceId, orderId, order
     if (seen) { console.log("[WIX WEBHOOK] Duplicate event ignored", { eventId, purchaseId: seen.purchaseId }); return { ok: true, duplicate: true }; }
   }
 
-  // Authoritative order: re-fetched from Wix with the instance token.
+  // 1. The instance must be a REAL installed Consultly site. Wix dashboard
+  //    "Trigger Test" events carry an instanceId that is not installed here:
+  //    ignore them (200 to stop retries) and never touch tokens or wallets.
+  const shop = await wixEcom.findInstalledShop(instanceId);
+  if (!shop) {
+    console.log("[WIX WEBHOOK] Unknown/test instance - ignored", { instanceId, orderId, eventType });
+    return { ok: true, ignored: true, reason: "unknown_instance" };
+  }
+  console.log("[WIX WEBHOOK] Instance found", { instanceId, shopId: String(shop._id) });
+
+  // 2. A Consultly purchase must already map to this order/checkout. The signed
+  //    payload's checkoutId is enough to look it up; if nothing matches this is
+  //    not a voucher order (or a test order) → ignore without calling Wix.
+  const hintedCheckoutId = orderFromEvent?.checkoutId || null;
+  const preMatch = await VoucherPurchase.findOne({ shopId: shop._id, $or: [{ wixOrderId: orderId }, ...(hintedCheckoutId ? [{ wixCheckoutId: hintedCheckoutId }] : [])] }).select("purchaseId status");
+  if (!preMatch) {
+    console.log("[VOUCHER PAYMENT] No purchase maps to this order on this site - ignored", { instanceId, orderId, checkoutId: hintedCheckoutId });
+    return { ok: true, ignored: true, reason: "no_purchase" };
+  }
+  console.log("[VOUCHER PAYMENT] Purchase found", { purchaseId: preMatch.purchaseId, status: preMatch.status });
+
+  // 3. Authoritative order: re-fetched from Wix with the INSTALLED site's token.
   let order = null;
   try {
     order = await wixEcom.getOrder({ instanceId, orderId });
@@ -161,16 +182,14 @@ async function handleOrderEvent({ eventId, eventType, instanceId, orderId, order
   if (!order) return { ok: false, code: "order_not_found" };
 
   const checkoutId = order.checkoutId || null;
-  const purchase = await VoucherPurchase.findOne(checkoutId ? { $or: [{ wixCheckoutId: checkoutId }, { wixOrderId: orderId }] } : { wixOrderId: orderId });
-  if (!purchase) { console.log("[VOUCHER PAYMENT] No Consultly purchase for this order (not a voucher order)", { orderId, checkoutId }); return { ok: true, ignored: true }; }
+  const purchase = await VoucherPurchase.findOne({ shopId: shop._id, $or: [{ wixOrderId: orderId }, ...(checkoutId ? [{ wixCheckoutId: checkoutId }] : [])] });
+  if (!purchase) { console.log("[VOUCHER PAYMENT] Verified order does not map to a purchase on this site - ignored", { orderId, checkoutId }); return { ok: true, ignored: true }; }
   if (purchase.wixInstanceId !== instanceId) {
     console.error("[VOUCHER PAYMENT] Instance mismatch — refusing", { purchaseId: purchase.purchaseId, expected: purchase.wixInstanceId, got: instanceId });
     return { ok: false, code: "instance_mismatch" };
   }
-  console.log("[VOUCHER PAYMENT] Purchase found:", purchase.purchaseId, "status:", purchase.status);
-
   const paymentStatus = String(order.paymentStatus || "").toUpperCase();
-  console.log("[VOUCHER PAYMENT] Payment status:", paymentStatus);
+  console.log("[VOUCHER PAYMENT] Payment verified", { purchaseId: purchase.purchaseId, paymentStatus, orderId: order.id || orderId, total: order.priceSummary?.total?.amount });
 
   // Line item must be the product we sold (defence in depth on top of checkoutId mapping).
   const items = order.lineItems || [];
@@ -252,7 +271,8 @@ async function finalizePaid({ purchase, eventId, orderMeta }) {
       if (r.modifiedCount !== 1) throw new Error("purchase_state_changed");
       console.log("[BILLING DEBUG] wallet credited", { userId: String(claimed.userId), added: claimed.credits, newBalance: u.walletBalance });
     });
-    console.log("[VOUCHER PAYMENT] Finalized successfully", { purchaseId: claimed.purchaseId, historyId: String(historyId) });
+    console.log("[VOUCHER PAYMENT] Credits added", { purchaseId: claimed.purchaseId, credits: claimed.credits, historyId: String(historyId) });
+    console.log("[VOUCHER PAYMENT] Finalized successfully", { purchaseId: claimed.purchaseId });
     return { ok: true, finalized: true, purchaseId: claimed.purchaseId };
   } catch (e) {
     await VoucherPurchase.updateOne({ _id: claimed._id, status: "PROCESSING", creditsAdded: false }, { $set: { status: "PENDING", lastError: `finalize:${e.message}` } });

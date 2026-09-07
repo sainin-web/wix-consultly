@@ -1,5 +1,6 @@
 const axios = require("axios");
 const { handleWixInstall } = require("./wix.service");
+const { shopModel } = require("../Modal/shopify");
 
 /**
  * Thin, documented client for the Wix eCommerce REST APIs used by the voucher
@@ -22,11 +23,25 @@ const WIX_STORES_APP_ID = "215238eb-22a5-4c36-9e7b-e7c08025e04e"; // Wix Stores 
 const headers = (token) => ({ Authorization: token, "Content-Type": "application/json" });
 const errInfo = (e) => e.response?.data?.message || e.response?.data?.details?.applicationError?.code || e.response?.status || e.message;
 
-/** Fresh instance token (refreshes via client credentials if expired). */
+/**
+ * Fresh token for an INSTALLED instance only. handleWixInstall upserts a shop
+ * row and asks Wix for a token — correct during installation, wrong here: an
+ * unknown instanceId (e.g. the Wix dashboard "Trigger Test" event) must never
+ * create a placeholder installation. So: look up the installed shop first,
+ * and only refresh a token that already exists.
+ */
 async function instanceToken(instanceId) {
-  const shop = await handleWixInstall({ instanceId });
+  const installed = await shopModel.findOne({ instanceId }).select("_id instanceId accessToken tokenExpiry");
+  if (!installed) { const e = new Error("instance_not_installed"); e.code = "instance_not_installed"; throw e; }
+  const shop = installed.accessToken && installed.tokenExpiry > Date.now() + 60000 ? installed : await handleWixInstall({ instanceId });
   if (!shop?.accessToken) throw new Error("wix_token_unavailable");
   return shop.accessToken;
+}
+
+/** Installed shop for a webhook instanceId, or null (unknown / test instance). */
+async function findInstalledShop(instanceId) {
+  if (!instanceId) return null;
+  return shopModel.findOne({ instanceId }).select("_id instanceId shop_Domain accessToken");
 }
 
 /** Catalog V3 products carry variants; a checkout line needs the variant id. */
@@ -90,4 +105,4 @@ async function getOrder({ instanceId, orderId }) {
   return data?.order || null;
 }
 
-module.exports = { createVoucherCheckout, getOrder, WIX_STORES_APP_ID, API };
+module.exports = { createVoucherCheckout, getOrder, findInstalledShop, WIX_STORES_APP_ID, API };

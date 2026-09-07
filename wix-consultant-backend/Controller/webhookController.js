@@ -27,7 +27,7 @@ async function handleEcomEvent(raw) {
   const { eventType, instanceId } = v.envelope || {};
   const ev = v.event || {};
   if (!ECOM_ORDER_EVENTS.has(eventType) && ev.entityFqdn !== "wix.ecom.v1.order") return { handled: false };
-  console.log("[WIX WEBHOOK] Event verified", { eventType, instanceId, eventId: ev.id, slug: ev.slug, orderId: ev.entityId });
+  console.log("[WIX WEBHOOK] Verified", { eventType, instanceId, eventId: ev.id, slug: ev.slug, orderId: ev.entityId });
   const orderFromEvent = ev.actionEvent?.body?.order || ev.currentEntity || ev.entity || null;
   const orderId = ev.entityId || orderFromEvent?.id || null;
   const r = await voucherPurchase.handleOrderEvent({ eventId: ev.id, eventType, instanceId, orderId, orderFromEvent });

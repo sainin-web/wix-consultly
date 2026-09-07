@@ -5494,6 +5494,21 @@ var ConsultantWidget = (() => {
           iframe.style.cssText = `width:100%; height:${defaultH}px; min-height:${defaultH}px; border:none; display:block;`;
           iframe.allow = "camera; microphone; autoplay; display-capture";
           iframe.setAttribute("allowfullscreen", "true");
+          window.addEventListener("message", async (event) => {
+            if (event.data?.type !== "MEDIA_DEVICE_CHECK" || event.source !== iframe.contentWindow) return;
+            let hasAudioInput = false, hasVideoInput = false;
+            try {
+              const devices = await navigator.mediaDevices.enumerateDevices();
+              hasAudioInput = devices.some((d) => d.kind === "audioinput");
+              hasVideoInput = devices.some((d) => d.kind === "videoinput");
+            } catch (e) {
+            }
+            console.log("[WIDGET] media device check", { hasAudioInput, hasVideoInput });
+            try {
+              iframe.contentWindow.postMessage({ type: "MEDIA_DEVICE_RESULT", hasAudioInput, hasVideoInput }, "*");
+            } catch (e) {
+            }
+          });
           window.addEventListener("message", (event) => {
             if (event.data?.type === "IFRAME_HEIGHT") {
               if (event.source !== iframe.contentWindow) {

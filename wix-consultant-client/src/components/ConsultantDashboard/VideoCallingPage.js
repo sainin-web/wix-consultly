@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import axios from "axios";
 import styles from "./VideoCallingPage.module.css";
-import { joinCall, leaveCall, toggleMute, toggleVideo, getLocalVideoTrack, getRemoteVideoTrack } from "../Redux/slices/callSlice";
+import { joinCall, leaveCall, toggleMute, toggleVideo, enableMicrophone, getLocalVideoTrack, getRemoteVideoTrack } from "../Redux/slices/callSlice";
 import { clearCallEvent } from "../Redux/slices/sokectSlice";
 import { ensureSocketRegistered, SOCKET_ROLE } from "../Sokect-io/SokectConfig";
 import { initRingtone, playRingtone, stopRingtone } from "../ringTone/ringingTune";
@@ -248,14 +248,16 @@ function VideoCallingPage() {
     finish("cancelled", { note: { text: "Call cancelled.", tone: "muted" } });
   };
   const retry = () => { setNote(null); setPhase("connecting"); joinedRef.current = false; };
-  const canOpenInTab = Boolean(media.mediaError?.canOpenInTab) && window.self !== window.top;
+  const embedded = window.self !== window.top;
+  const canOpenInTab = Boolean(media.mediaError?.canOpenInTab) && embedded;
+  const retryMic = () => { console.log("[CALL DEBUG] retry microphone"); dispatch(enableMicrophone()); };
   const openInTab = () => {
     // Restrictive browsers (e.g. Brave Shields) deny devices to embedded pages;
     // the same page works standalone. Mark it so the storefront gate stays quiet here.
     try { sessionStorage.setItem(`call_in_tab:${callId}`, "1"); } catch (e) { /* ignore */ }
     const url = `${window.location.origin}/video/calling/page?callId=${encodeURIComponent(callId)}${returnTo ? `&return=${encodeURIComponent(returnTo)}` : ""}`;
     const w = window.open(url, "_blank", "noopener");
-    if (w) goBack();
+    if (w) { dispatch(leaveCall()); goBack(); }
     else setNote({ text: "Your browser blocked the new tab. Allow pop-ups for this site and try again.", tone: "danger" });
   };
   const abandon = async () => {
@@ -300,7 +302,17 @@ function VideoCallingPage() {
 
         {/* Banners */}
         {note && !terminal && <div className={`${styles.banner} ${styles[`banner_${note.tone}`] || ""}`} role="status">{note.text}</div>}
-        {media.mediaWarning && (phase === "active" || phase === "connecting") && <div className={`${styles.banner} ${styles.banner_warn}`}>{media.mediaWarning.message}</div>}
+        {media.mediaWarning && (phase === "active" || phase === "connecting") && (
+          <div className={`${styles.banner} ${styles.banner_warn}`}>
+            <span>{media.mediaWarning.message}</span>
+            {!media.hasLocalAudio && (
+              <span className={styles.bannerActions}>
+                <button type="button" className={styles.bannerBtn} onClick={retryMic} disabled={media.micRetrying}>{media.micRetrying ? "Checking…" : "Retry microphone"}</button>
+                {embedded && <button type="button" className={styles.bannerBtn} onClick={openInTab}>Open in a new tab</button>}
+              </span>
+            )}
+          </div>
+        )}
         {credits != null && phase === "active" && (
           <div className={`${styles.banner} ${credits <= 10 ? styles.banner_danger : styles.banner_warn}`} role="alert">
             {credits > 0 ? `${credits} seconds of credits remaining` : "Credits exhausted — ending call"}

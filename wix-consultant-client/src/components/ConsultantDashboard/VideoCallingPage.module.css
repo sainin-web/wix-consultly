@@ -326,3 +326,18 @@
   .bigTimer { font-size: 26px; }
   .secure span { display: none; }
 }
+
+/* banner actions (retry microphone / open in a new tab) */
+.bannerActions { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 6px; width: 100%; }
+.bannerBtn {
+  padding: 4px 10px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.bannerBtn:disabled { opacity: .55; cursor: not-allowed; }

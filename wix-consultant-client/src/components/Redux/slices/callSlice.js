@@ -63,6 +63,24 @@ const inIframe = () => { try { return window.self !== window.top; } catch (e) { 
 const isBrave = () => Boolean(navigator.brave);
 
 /**
+ * Restrictive browsers (Brave Shields) answer getUserMedia inside a third-party
+ * iframe with NotFoundError even when a microphone exists. Only the top-level
+ * page can tell the difference, so ask the Wix widget (parent) to enumerate.
+ * Resolves { hasAudioInput, hasVideoInput } or null (not embedded / no answer).
+ */
+function askParentDevices(timeoutMs = 1500) {
+  return new Promise((resolve) => {
+    if (!inIframe()) return resolve(null);
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; window.removeEventListener("message", onMsg); resolve(v); };
+    const onMsg = (e) => { if (e.source === window.parent && e.data?.type === "MEDIA_DEVICE_RESULT") finish(e.data); };
+    window.addEventListener("message", onMsg);
+    try { window.parent.postMessage({ type: "MEDIA_DEVICE_CHECK" }, "*"); } catch (e) { return finish(null); }
+    setTimeout(() => finish(null), timeoutMs);
+  });
+}
+
+/**
  * Probe the media stack with the browser API BEFORE Agora, so the failure
  * reason is exact: embedding policy → permission → no device → device busy.
  * Resolves { ok:true } or { ok:false, code, message, canOpenInTab }.
@@ -104,8 +122,15 @@ export async function probeMedia(callType) {
           return { ok: true, warning: { code: "camera_unavailable", message: "No camera was found — continuing with audio only." } };
         } catch (e) { /* fall through to audio error */ }
       }
-      // No input device at all: join receive-only (matches the previous behaviour) and say so.
-      return { ok: true, noAudio: true, warning: { code: "no_microphone", message: "No microphone detected — you can hear the other participant, but they cannot hear you." + hint } };
+      // NotFound inside an iframe is ambiguous: no device, or the browser hiding
+      // devices from embedded pages (Brave Shields). Ask the top-level page.
+      const parent = await askParentDevices();
+      console.warn("[CALL DEBUG] getUserMedia NotFound", { embedded, brave: isBrave(), parentSeesMic: parent?.hasAudioInput ?? "unknown" });
+      if (parent?.hasAudioInput) {
+        return { ok: true, noAudio: true, warning: { code: "embed_blocked", message: "Your microphone exists, but this browser is blocking embedded pages from using it. You can hear the other participant, but they cannot hear you. Open the call in a new tab to talk" + (isBrave() ? ", or lower Brave Shields for this site and press Retry microphone." : ".") } };
+      }
+      // Truly no input device: join receive-only and say so.
+      return { ok: true, noAudio: true, warning: { code: "no_microphone", message: "No microphone was detected on this device — you can hear the other participant, but they cannot hear you. Connect a microphone and press Retry microphone." + (embedded && parent === null ? hint : "") } };
     }
     if (name === "NotReadableError" || name === "AbortError") {
       return { ok: false, code: "device_busy", message: "Your microphone or camera is already in use by another application or tab. Close it and try again.", canOpenInTab: false };
@@ -269,6 +294,30 @@ export const joinCall = createAsyncThunk(
   },
 );
 
+/**
+ * Mid-call: try again to get a microphone (after plugging one in or lowering
+ * Shields) and publish it without leaving the channel.
+ */
+export const enableMicrophone = createAsyncThunk("call/enableMicrophone", async (_, { rejectWithValue }) => {
+  if (localAudioTrack) return { ok: true };
+  if (client.connectionState !== "CONNECTED") return rejectWithValue({ code: "not_connected", message: "Not connected yet — try again in a moment." });
+  const probe = await probeMedia("voice");
+  if (!probe.ok) return rejectWithValue(probe);
+  if (probe.noAudio) return rejectWithValue(probe.warning);
+  try {
+    localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
+    await client.publish([localAudioTrack]);
+    console.log("[AGORA DEBUG] microphone published after retry");
+    return { ok: true };
+  } catch (err) {
+    try { localAudioTrack?.close(); } catch (e) { /* ignore */ }
+    localAudioTrack = null;
+    const d = describeMediaError(err, "voice");
+    console.error("[CALL ERROR] enable microphone failed:", err?.code || err?.name, err?.message);
+    return rejectWithValue({ ...d, details: `${err?.code || err?.name || "ERROR"}: ${err?.message || ""}`.slice(0, 300) });
+  }
+});
+
 export const leaveCall = createAsyncThunk("call/leave", async () => {
   remoteAudioTrack?.stop();
   remoteVideoTrack?.stop();
@@ -295,6 +344,7 @@ const initialState = {
   remoteVideoOn: false,
   mediaError: null,
   mediaWarning: null,
+  micRetrying: false,
 };
 
 const callSlice = createSlice({
@@ -341,6 +391,17 @@ const callSlice = createSlice({
       .addCase(joinCall.rejected, (state, action) => {
         state.phase = "failed";
         state.mediaError = action.payload || { code: "join_failed", message: "Unable to connect the call." };
+      })
+      .addCase(enableMicrophone.pending, (state) => { state.micRetrying = true; })
+      .addCase(enableMicrophone.fulfilled, (state) => {
+        state.micRetrying = false;
+        state.hasLocalAudio = true;
+        state.muted = false;
+        state.mediaWarning = null;
+      })
+      .addCase(enableMicrophone.rejected, (state, action) => {
+        state.micRetrying = false;
+        if (action.payload?.message) state.mediaWarning = { code: action.payload.code || "no_microphone", message: action.payload.message };
       })
       .addCase(leaveCall.fulfilled, () => initialState);
   },

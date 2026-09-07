@@ -347,6 +347,21 @@ class ConsultantLogin extends HTMLElement {
     iframe.allow = "camera; microphone; autoplay; display-capture";
     iframe.setAttribute("allowfullscreen", "true");
 
+    // The call page cannot tell "no microphone" from "browser hides devices
+    // from embedded pages" (Brave Shields). This top-level page can, so it
+    // answers device checks — kinds only, never labels or ids.
+    window.addEventListener("message", async (event) => {
+      if (event.data?.type !== "MEDIA_DEVICE_CHECK" || event.source !== iframe.contentWindow) return;
+      let hasAudioInput = false, hasVideoInput = false;
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        hasAudioInput = devices.some((d) => d.kind === "audioinput");
+        hasVideoInput = devices.some((d) => d.kind === "videoinput");
+      } catch (e) { /* unsupported → report nothing found */ }
+      console.log("[WIDGET] media device check", { hasAudioInput, hasVideoInput });
+      try { iframe.contentWindow.postMessage({ type: "MEDIA_DEVICE_RESULT", hasAudioInput, hasVideoInput }, "*"); } catch (e) { /* ignore */ }
+    });
+
     window.addEventListener("message", (event) => {
       if (event.data?.type === "IFRAME_HEIGHT") {
         // Only accept height messages from THIS widget's own iframe. Without

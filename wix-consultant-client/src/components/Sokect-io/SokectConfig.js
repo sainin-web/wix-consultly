@@ -73,6 +73,21 @@ export function getSocket(role) {
       reconnectionDelayMax: 5000,
       auth: authToken ? { token: authToken } : {},
     });
+    // A reconnect creates a NEW server-side socket that knows nothing about the
+    // user. Re-register automatically so rooms/presence come back without a
+    // page refresh. (Only after a previous successful registration.)
+    socketInstance.on("connect", () => {
+      const s = socketInstance;
+      if (!s || !registeredUserId) { console.log("[socket] connected", s?.id); return; }
+      console.log(`[${registeredRole === SOCKET_ROLE.CONSULTANT ? "CONSULTANT SOCKET" : "socket"}] reconnected ${s.id} → re-registering ${registeredUserId}`);
+      s.emit("register", registeredUserId);
+    });
+    socketInstance.on("registerAck", (ack) => {
+      if (ack?.success) console.log(`[${registeredRole === SOCKET_ROLE.CONSULTANT ? "CONSULTANT SOCKET" : "socket"}] registered ${ack.userId} on ${socketInstance?.id}`);
+    });
+    socketInstance.on("disconnect", (reason) => {
+      console.warn("[socket] disconnected:", reason, "(auto-reconnect on)");
+    });
   } else if (authToken) {
     socketInstance.auth = { token: authToken };
   } else {
@@ -175,6 +190,28 @@ export function ensureSocketRegistered(userId, options = {}) {
 
   registerInFlight.set(key, promise);
   return promise;
+}
+
+/**
+ * Health check used when a page mounts / regains focus / becomes visible:
+ * make sure ONE socket exists, is connected, and is registered as userId.
+ * Never creates a second instance; re-registration is idempotent server-side.
+ */
+export async function ensureSocketConnected(userId, options = {}) {
+  if (!userId) return false;
+  const role = resolveRole(options.role);
+  const tag = role === SOCKET_ROLE.CONSULTANT ? "[CONSULTANT SOCKET]" : "[socket]";
+  const s = getSocket(role);
+  const uid = String(userId);
+  console.log(`${tag} check`, { id: s.id, connected: s.connected, registeredAs: registeredUserId, reason: options.reason || "manual" });
+  if (!s.connected) {
+    console.log(`${tag} not connected → connecting`);
+    registeredUserId = null; // the server socket will be new: force a full register
+    s.connect();
+  }
+  const ok = await ensureSocketRegistered(uid, { role, force: options.force || !s.connected || registeredUserId !== uid });
+  console.log(`${tag} ${ok ? "ready" : "NOT READY"}`, { id: s.id, connected: s.connected });
+  return ok;
 }
 
 /** @deprecated use ensureSocketRegistered */

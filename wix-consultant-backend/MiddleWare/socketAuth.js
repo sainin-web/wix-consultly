@@ -79,17 +79,14 @@ async function registerSocketUser(socket, user_Id, onlineUsers) {
     }
   }
 
+  // One user may legitimately hold several sockets (consultant dashboard +
+  // dedicated call tab, or several browser tabs). They all live in room `uid`
+  // and emitToUser de-duplicates, so an existing socket is NOT stale: keep it
+  // registered. (Disconnecting it here was what left the dashboard connected
+  // but unregistered after every call.)
   const existingSocketId = onlineUsers.get(uid);
   if (existingSocketId && existingSocketId !== socket.id) {
-    const oldSocket = socket.nsp?.sockets?.get(existingSocketId);
-    if (oldSocket) {
-      console.log(
-        `[socket] replacing stale connection for ${uid}: ${existingSocketId} → ${socket.id}`
-      );
-      oldSocket.data.userId = null;
-      oldSocket.disconnect(true);
-    }
-    onlineUsers.delete(uid);
+    console.log(`[socket] additional connection for ${uid}: ${existingSocketId} + ${socket.id}`);
   }
 
   socket.data.userId = uid;

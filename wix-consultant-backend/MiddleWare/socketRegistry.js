@@ -50,11 +50,32 @@ async function replayPending(io, onlineUsers, map, userId, event) {
   return list.length;
 }
 
+/**
+ * Drop this socket from the registry. If the user still has another registered
+ * socket (dashboard tab while the call tab closes, etc.), point the map at it
+ * so the user stays "online"; only delete when no socket is left.
+ */
 function removeSocketFromRegistry(socket, onlineUsers) {
   const uid = socket.data?.userId;
   if (!uid) return null;
   if (onlineUsers.get(uid) === socket.id) {
-    onlineUsers.delete(uid);
+    let replacement = null;
+    try {
+      const room = socket.nsp?.adapter?.rooms?.get(uid);
+      if (room) {
+        for (const sid of room) {
+          if (sid === socket.id) continue;
+          const other = socket.nsp.sockets.get(sid);
+          if (other && other.data?.userId === uid && other.connected) { replacement = sid; break; }
+        }
+      }
+    } catch (e) { /* fall through → delete */ }
+    if (replacement) {
+      onlineUsers.set(uid, replacement);
+      console.log(`[socket] ${uid} still online via ${replacement} (closed ${socket.id})`);
+    } else {
+      onlineUsers.delete(uid);
+    }
   }
   return uid;
 }

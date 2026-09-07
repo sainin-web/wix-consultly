@@ -505,7 +505,7 @@ const ioServer = (server) => {
 
       if (uid) {
         try {
-          await User.findByIdAndUpdate(uid, { isActive: false });
+          if (!onlineUsers.has(uid)) await User.findByIdAndUpdate(uid, { isActive: false });
         } catch (err) {
           console.error("[socket] isActive update error:", err.message);
         }

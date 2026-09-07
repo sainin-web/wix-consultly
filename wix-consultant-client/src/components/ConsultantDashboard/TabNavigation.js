@@ -3,7 +3,7 @@ import { useNavigate, useLocation, Outlet } from "react-router-dom";
 import "bootstrap/dist/css/bootstrap.min.css";
 import styles from "../../components/ConsultantDashboard/TabNavigation.module.css";
 import { useDispatch, useSelector } from "react-redux";
-import { ensureSocketRegistered, SOCKET_ROLE } from "../Sokect-io/SokectConfig";
+import { ensureSocketConnected, SOCKET_ROLE } from "../Sokect-io/SokectConfig";
 import {
   getConsultantId,
   getShopId,
@@ -114,9 +114,21 @@ function TabNavigation({ children }) {
     }
   };
 
+  // The dashboard socket must stay registered for incoming calls at all times.
+  // Verify on mount and whenever the consultant comes back to this tab (e.g.
+  // after the call tab closes). Cheap: no new instance, idempotent register.
   useEffect(() => {
     if (!userId) return;
-    ensureSocketRegistered(userId, { role: SOCKET_ROLE.CONSULTANT });
+    ensureSocketConnected(userId, { role: SOCKET_ROLE.CONSULTANT, reason: "dashboard mount" });
+    const onFocus = () => { console.log("[CONSULTANT SOCKET] Dashboard focused"); ensureSocketConnected(userId, { role: SOCKET_ROLE.CONSULTANT, reason: "focus" }); };
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      console.log("[CONSULTANT SOCKET] Dashboard visible");
+      ensureSocketConnected(userId, { role: SOCKET_ROLE.CONSULTANT, reason: "visible" });
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onVisible); };
   }, [userId]);
 
   // A live call is never rendered inside the dashboard: ActiveCallGate (below)

@@ -26,6 +26,7 @@ import {
 } from "../Redux/slices/sokectSlice";
 import { formatCurrency } from "../Helper/Helper";
 import PortalModal from "../middle-ware/PortalModal";
+import { attachEndOnPageHide } from "../../utils/chatBeacon";
 
 const UserChat = () => {
   const [text, setText] = useState();
@@ -79,7 +80,7 @@ const UserChat = () => {
   const [ending, setEnding] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
   const [peerNote, setPeerNote] = useState(null); // { text, tone }
-  const { chatEndSummary, peerConnection, messageRejected } = useSelector((state) => state.socket);
+  const { chatTimer, autoChatEnded, chatEndSummary, peerConnection, messageRejected } = useSelector((state) => state.socket);
   const currency = userDetails?.data?.currency || "";
   
   useEffect(() => {
@@ -194,6 +195,11 @@ const UserChat = () => {
     const t = setTimeout(() => { setRejectNote(""); dispatch(setMessageRejected(null)); }, 4000);
     return () => clearTimeout(t);
   }, [messageRejected, dispatch]);
+
+  // Refresh / close during an active session ends it immediately (no grace).
+  const timerRef = useRef(chatTimer);
+  useEffect(() => { timerRef.current = { ...chatTimer, endedBy: clientId }; }, [chatTimer, clientId]);
+  useEffect(() => attachEndOnPageHide(() => timerRef.current), []);
 
   const isNearBottom = () => {
     if (!messagesAreaRef.current) return true;
@@ -474,8 +480,6 @@ const UserChat = () => {
     navigate(`/consultant/card${q}`);
   };
 
-  const { chatTimer } = useSelector((state) => state.socket);
-  const { autoChatEnded } = useSelector((state) => state.socket);
   const [seconds, setSeconds] = useState(0);
 
   useEffect(() => {

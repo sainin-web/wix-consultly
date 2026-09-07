@@ -8,6 +8,7 @@
  * changes, re-renders) never stack duplicate listeners.
  */
 import { getSocket } from "./SokectConfig";
+import { getSocketRegisterId } from "../../utils/wixStorage";
 import {
   setConnected,
   setActiveUsers,
@@ -25,6 +26,8 @@ import {
   setConfirmChat,
   setPeerConnection,
   setMessageRejected,
+  pushNotification,
+  pushMissedCall,
 } from "../Redux/slices/sokectSlice";
 
 let dispatchRef = null;
@@ -73,7 +76,23 @@ function createHandlers() {
     if (payload?.success) dispatchRef?.(setConnected(true));
   };
   handlers.activeUsers = (list) => dispatchRef?.(setActiveUsers(list));
-  handlers.receiveMessage = (msg) => dispatchRef?.(addMessage(msg));
+  handlers.receiveMessage = (msg) => {
+    dispatchRef?.(addMessage(msg));
+    // Bell feed: only messages addressed to THIS user (not our own echoes).
+    const me = getSocketRegisterId();
+    if (msg?._id && me && String(msg.receiverId) === String(me) && String(msg.senderId) !== String(me)) {
+      dispatchRef?.(
+        pushNotification({
+          id: `msg:${msg._id}`,
+          type: "message",
+          title: msg.senderName || "New message",
+          text: msg.text || "",
+          from: String(msg.senderId),
+          shopId: msg.shop_id ? String(msg.shop_id) : null,
+        }),
+      );
+    }
+  };
   handlers.seenUpdate = (data) => dispatchRef?.(markMessagesSeen(data));
   handlers.balanceError = (err) => dispatchRef?.(setInsufficientBalanceError(err));
   handlers.userChatAccepted = (res) => dispatchRef?.(setChatAccepted(res?.message));
@@ -113,7 +132,13 @@ function createHandlers() {
     dispatchRef?.(setMessageRejected(p));
   };
   handlers.callAcceptedStarted = (data) => dispatchRef?.(setCallAccepted(data));
-  handlers.callMissed = (data) => dispatchRef?.(setCallEnded(data));
+  handlers.callMissed = (data) => {
+    dispatchRef?.(setCallEnded(data));
+    // Only the callee sees a "missed call" — the caller was the one ringing.
+    const me = getSocketRegisterId();
+    const receiverId = data?.callId ? String(data.callId).split("_")[1] : null;
+    if (me && receiverId && String(receiverId) === String(me)) dispatchRef?.(pushMissedCall(data));
+  };
   handlers.callEnded = (data) => dispatchRef?.(setCallEnded(data));
   handlers.callEndedRejected = (data) => {
     dispatchRef?.(setCallRejected(data));

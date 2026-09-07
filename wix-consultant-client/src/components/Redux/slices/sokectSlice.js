@@ -34,6 +34,8 @@ const emptyTimer = () => ({
     consultantId: null,
 });
 
+const MAX_NOTIFICATIONS = 50;
+
 const socketSlice = createSlice({
     name: "socket",
     initialState: {
@@ -55,6 +57,8 @@ const socketSlice = createSlice({
         peerConnection: null,
         /** Last server rejection of a message: { reason, message, at } */
         messageRejected: null,
+        /** Bell feed (session-scoped): [{ id, type:"message"|"missed_call", title, text, from, at, read }] */
+        notifications: [],
     },
     reducers: {
         setConnected: (state, action) => {
@@ -126,6 +130,44 @@ const socketSlice = createSlice({
         setMessageRejected: (state, action) => {
             state.messageRejected = action.payload ? { ...action.payload, at: Date.now() } : null;
         },
+        /* ── Bell feed ── */
+        pushNotification: (state, action) => {
+            const n = action.payload;
+            if (!n || !n.id) return;
+            if (state.notifications.some((x) => x.id === n.id)) return;
+            state.notifications.unshift({ read: false, at: Date.now(), ...n });
+            if (state.notifications.length > MAX_NOTIFICATIONS) state.notifications.length = MAX_NOTIFICATIONS;
+        },
+        /** A missed call: the caller name comes from the last incoming-call payload. */
+        pushMissedCall: (state, action) => {
+            const p = action.payload || {};
+            const id = `missed:${p.callId || Date.now()}`;
+            if (state.notifications.some((x) => x.id === id)) return;
+            const callerId = p.callId ? String(p.callId).split("_")[0] : state.incomingCall?.callerId || null;
+            state.notifications.unshift({
+                id,
+                type: "missed_call",
+                title: "Missed call",
+                text: `${state.incomingCall?.callerName || "A client"} tried to ${state.incomingCall?.callType === "video" ? "video call" : "call"} you`,
+                from: callerId,
+                read: false,
+                at: Date.now(),
+            });
+            if (state.notifications.length > MAX_NOTIFICATIONS) state.notifications.length = MAX_NOTIFICATIONS;
+        },
+        markAllNotificationsRead: (state) => {
+            state.notifications.forEach((n) => { n.read = true; });
+        },
+        /** Messages from a sender are read once their conversation is open. */
+        dismissNotificationsFrom: (state, action) => {
+            const from = String(action.payload || "");
+            state.notifications.forEach((n) => {
+                if (n.type === "message" && String(n.from) === from) n.read = true;
+            });
+        },
+        clearNotifications: (state) => {
+            state.notifications = [];
+        },
         setAutoChatEnded: (state, action) => {
             state.autoChatEnded = action.payload;
         },
@@ -169,6 +211,11 @@ export const {
     clearChatEndSummary,
     setPeerConnection,
     setMessageRejected,
+    pushNotification,
+    pushMissedCall,
+    markAllNotificationsRead,
+    dismissNotificationsFrom,
+    clearNotifications,
     setAutoChatEnded,
     setIncomingCall,
     setCallAccepted,

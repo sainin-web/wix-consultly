@@ -13,6 +13,7 @@ import { fetchConsultantById } from "../Redux/slices/ConsultantSlices";
 import ConsultantProfileModal from "./ConsultantProfileModal";
 import axios from "axios";
 import DashboardTopNav, { NAV_ICONS } from "./DashboardTopNav";
+import { markAllNotificationsRead, dismissNotificationsFrom } from "../Redux/slices/sokectSlice";
 
 const isWixEmbed = () =>
   typeof window !== "undefined" && window.self !== window.top;
@@ -32,6 +33,17 @@ function TabNavigation({ children }) {
     profileImage: null,
   });
   const { consultantOverview } = useSelector((state) => state.consultants);
+  const notifications = useSelector((state) => state.socket.notifications) || [];
+
+  const openNotification = (n) => {
+    const search = location.search || window.location.search;
+    if (n.type === "message") {
+      dispatch(dismissNotificationsFrom(n.from));
+      navigate(`/consultant-dashboard/chats${search}`, { state: { openUserId: n.from } });
+    } else {
+      navigate(`/consultant-dashboard/call-chat-logs${search}`);
+    }
+  };
   const params = new URLSearchParams(window.location.search);
   const shop = params.get("shop");
   const token = localStorage.getItem("token");
@@ -265,6 +277,9 @@ function TabNavigation({ children }) {
             onLogout={handleLogout}
             displayName={displayName}
             imageUrl={imageUrl}
+            notifications={notifications}
+            onOpenNotification={openNotification}
+            onMarkAllRead={() => dispatch(markAllNotificationsRead())}
           />
         )}
 

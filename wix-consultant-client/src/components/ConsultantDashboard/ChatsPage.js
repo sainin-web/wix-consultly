@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, Fragment } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
+import { attachEndOnPageHide } from "../../utils/chatBeacon";
 import styles from "./ChatsPage.module.css";
 import axios from "axios";
 import { socket, ensureSocketRegistered, SOCKET_ROLE } from "../Sokect-io/SokectConfig";
 import { getConsultantId, getShopId, clearConsultantSession } from "../../utils/wixStorage";
 import { fetchChatHistory, updateUserRequestById } from "../Redux/slices/ConsultantSlices";
 import { useDispatch, useSelector } from "react-redux";
-import { addMessage, setChatTimerStopped, setChatTimerStarted, clearChatEndSummary, setMessageRejected } from "../Redux/slices/sokectSlice";
+import { addMessage, setChatTimerStopped, setChatTimerStarted, clearChatEndSummary, setMessageRejected, dismissNotificationsFrom } from "../Redux/slices/sokectSlice";
 import { formatCurrency } from "../Helper/Helper";
 import PortalModal from "../middle-ware/PortalModal";
 import { BsThreeDotsVertical } from "react-icons/bs";
@@ -60,6 +61,7 @@ function formatClock(iso) {
 
 const ChatsPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [showChatView, setShowChatView] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -150,6 +152,23 @@ const ChatsPage = () => {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [consultantId]);
+
+  // Refresh / close during an active session ends it immediately (no grace).
+  const timerRef = useRef(chatTimer);
+  useEffect(() => { timerRef.current = { ...chatTimer, consultantId, endedBy: consultantId }; }, [chatTimer, consultantId]);
+  useEffect(() => attachEndOnPageHide(() => timerRef.current), []);
+
+  // Opened from the bell: select that client once the list is in.
+  useEffect(() => {
+    const target = location.state?.openUserId;
+    if (!target || !chatList.length) return;
+    const conv = chatList.find((c) => String(c.sender?.id) === String(target));
+    if (conv) {
+      handleChatSelect({ shopId: conv.shop.id, userId: conv.sender.id, isChatAccepted: conv.isChatAccepted });
+      window.history.replaceState({}, "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state, chatList]);
 
   // Once the chat list is in, open the conversation the server says is active.
   useEffect(() => {
@@ -270,6 +289,8 @@ const ChatsPage = () => {
       if (!forOpenChat) {
         const key = String(latest.senderId);
         setUnread((prev) => ({ ...prev, [key]: (prev[key] || 0) + 1 }));
+      } else {
+        dispatch(dismissNotificationsFrom(latest.senderId));
       }
     }
 
@@ -358,6 +379,7 @@ const ChatsPage = () => {
 
   const handleChatSelect = (chatData) => {
     dbg("Conversation selected", chatData);
+    dispatch(dismissNotificationsFrom(chatData.userId));
     setChaterIds(chatData);
     setChatAccepted(chatData);
     setUnread((prev) => {

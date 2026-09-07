@@ -173,6 +173,164 @@
 .dangerItem svg { color: inherit; }
 .dangerItem:hover { background: var(--cds-danger-soft, #fef3f2); }
 
+/* ── Notifications bell ─────────────────────────────────────── */
+
+.bellWrap { position: relative; }
+
+.bellBtn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cds-text-muted, #666b78);
+  font-size: 18px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.bellBtn:hover,
+.bellOpen {
+  background: var(--cds-hover, #f2f3f5);
+  color: var(--cds-text, #111318);
+}
+
+.bellBadge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--cds-danger, #b42318);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  border: 2px solid var(--cds-surface, #fff);
+  box-sizing: content-box;
+}
+
+.bellMenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 320px;
+  max-width: calc(100vw - 24px);
+  background: var(--cds-surface, #fff);
+  border: 1px solid var(--cds-border, #e6e8ec);
+  border-radius: 10px;
+  box-shadow: var(--cds-shadow-lift, 0 8px 24px -8px rgba(16, 24, 40, 0.16));
+  z-index: 41;
+  overflow: hidden;
+}
+
+.bellHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--cds-border, #e6e8ec);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cds-text, #111318);
+}
+
+.bellLink {
+  border: 0;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cds-text-muted, #666b78);
+  cursor: pointer;
+}
+
+.bellLink:hover { color: var(--cds-text, #111318); }
+
+.bellEmpty {
+  padding: 22px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--cds-text-muted, #666b78);
+}
+
+.bellList {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.bellItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bellItem:hover { background: var(--cds-hover, #f2f3f5); }
+.bellItemUnread { background: var(--cds-accent-soft, #eeeff2); }
+
+.bellIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--cds-surface, #fff);
+  border: 1px solid var(--cds-border, #e6e8ec);
+  color: var(--cds-text, #111318);
+  font-size: 15px;
+}
+
+.bellIconCall { color: var(--cds-danger, #b42318); }
+
+.bellBody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+
+.bellTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cds-text, #111318);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bellText {
+  font-size: 12.5px;
+  color: var(--cds-text-muted, #666b78);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bellTime { font-size: 11px; color: var(--cds-text-subtle, #9096a3); }
+
+.bellDot {
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--cds-accent, #16181d);
+}
+
 /* ── Right-hand actions ─────────────────────────────────────── */
 
 .actions {

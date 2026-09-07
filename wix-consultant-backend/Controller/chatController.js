@@ -103,7 +103,11 @@ const getActiveSession = async (request, response) => {
 const endSession = async (request, response) => {
   try {
     const { transactionId } = request.params;
-    const { endedBy } = request.body || {};
+    let body = request.body || {};
+    if (typeof body === "string") {
+      try { body = JSON.parse(body || "{}"); } catch (e) { body = {}; }
+    }
+    const { endedBy, endReason } = body;
     if (!mongoose.Types.ObjectId.isValid(transactionId) || !mongoose.Types.ObjectId.isValid(endedBy || "")) {
       return response.status(400).json({ success: false, message: "Invalid IDs" });
     }
@@ -112,7 +116,8 @@ const endSession = async (request, response) => {
     if (![String(tx.senderId), String(tx.receiverId)].includes(String(endedBy))) {
       return response.status(403).json({ success: false, message: "Not a participant of this session" });
     }
-    const result = await endAndBroadcast({ transactionId, endedBy, endReason: "ended" });
+    const reason = endReason === "page_closed" ? "page_closed" : "ended";
+    const result = await endAndBroadcast({ transactionId, endedBy, endReason: reason });
     if (!result.ok) return response.status(409).json({ success: false, message: result.error });
     return response.status(200).json({ success: true, alreadyEnded: Boolean(result.alreadyEnded), session: result.session });
   } catch (error) {

@@ -8,7 +8,8 @@
 
 .storefront-nav,
 .consultant-home,
-.customer-profile {
+.customer-profile,
+.customer-chat {
   --sf-accent: #ff6b35;
   --sf-accent-strong: #e85d28;
   --sf-accent-soft: #fff4f0;

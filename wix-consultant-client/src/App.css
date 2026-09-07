@@ -95,31 +95,6 @@ body.wix-embed.wix-embed-chat .App {
   flex-direction: column !important;
 }
 
-.chat-route-shell {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  height: auto;
-  min-height: 0;
-  width: 100%;
-  overflow: visible;
-  box-sizing: border-box;
-}
-
-.chat-route-shell > nav {
-  flex-shrink: 0;
-  position: relative;
-  z-index: 20;
-}
-
-.chat-route-shell .chatRouteFill {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
 /* Consultant dashboard: full iframe height (min 900px) */
 html.wix-embed.wix-embed-dashboard,
 body.wix-embed.wix-embed-dashboard {

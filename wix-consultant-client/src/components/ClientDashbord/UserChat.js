@@ -1,6 +1,7 @@
 import React, { Fragment, useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import styles from "./UserChat.module.css";
+import "../../css/storefront-tokens.css";
 import {
   socket,
   ensureSocketRegistered,
@@ -513,6 +514,12 @@ const UserChat = () => {
     setRefreshed((prev) => !prev);
   };
 
+  // Messages can only be typed/sent once the session is active. The session
+  // card (Start chat → waiting → Accept) drives showChatLock; nothing else is
+  // needed. sendChat("Hello") from the card is the request itself and is
+  // called directly, so it is unaffected by this gate.
+  const canSend = !showChatLock;
+
   return (
     <Fragment>
       <InsufficientBalanceModal
@@ -521,7 +528,7 @@ const UserChat = () => {
         insufficientBalance={insufficientBalance}
       />
 
-      <div className={styles.chatRouteFill}>
+      <div className={`customer-chat ${styles.chatRouteFill}`}>
         <div className={styles.chatPageContainer}>
           <div className={styles.container}>
             {/* Chat Window */}
@@ -565,12 +572,7 @@ const UserChat = () => {
                         {consultantOverview?.consultant?.fullname}
                       </div>
                       <div
-                        className={styles.chatHeaderStatus}
-                        style={{
-                          color: consultantOverview?.consultant?.isActive
-                            ? "#10b981"
-                            : "#6c757d",
-                        }}
+                        className={`${styles.chatHeaderStatus} ${consultantOverview?.consultant?.isActive ? styles.statusOnline : ""}`}
                       >
                         {consultantOverview?.consultant?.isActive
                           ? "Active now"
@@ -580,35 +582,13 @@ const UserChat = () => {
                   </div>
                   <div className={styles.chatHeaderActions}>
                     {chatTimer.isRunning && (
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          gap: "10px",
-                          mr: "10px",
-                        }}
-                      >
-                        <p>
-                          {" "}
-                          Timer: {minutes}:{remainingSeconds}
-                        </p>
-                        <div>
-                          <button
-                            onClick={stopChatTimer}
-                            style={{
-                              padding: "5px 12px",
-                              backgroundColor: "#ff4d4f",
-                              color: "#fff",
-                              border: "none",
-                              borderRadius: "4px",
-                              cursor: "pointer",
-                              fontSize: "13px",
-                            }}
-                          >
-                            Stop Chat
-                          </button>
-                        </div>
+                      <div className={styles.timer}>
+                        <span className={styles.timerValue}>
+                          {minutes}:{String(remainingSeconds).padStart(2, "0")}
+                        </span>
+                        <button type="button" onClick={stopChatTimer} className={styles.stopBtn}>
+                          End chat
+                        </button>
                       </div>
                     )}
                   </div>
@@ -616,86 +596,21 @@ const UserChat = () => {
 
                 {/* Messages Area */}
                 <div className={styles.messagesArea} ref={messagesAreaRef}>
-                  {showChatLock && (
-                    <div className={styles.chatEndOverlay}>
-                      <div className={styles.chatEndBox}>
-                        <div
-                          style={{
-                            position: "relative",
-                            width: "44px",
-                            height: "44px",
-                          }}
-                        >
-                          <div className={styles.lockIcon}>🔒</div>
-                          {waitingForAccept && (
-                            <div className={styles.reverseRing}></div>
-                          )}
-                        </div>
-                        <div className={styles.chatEndContent}>
-                          <h4>chat unlock </h4>
-                          <p>Your chat session has unlocked.</p>
-                        </div>
-                        {isLock ? (
-                          <button
-                            style={{
-                              marginLeft: "auto",
-                              background: "green",
-                              color: "#fff",
-                              border: "none",
-                              padding: "8px 16px",
-                              borderRadius: "6px",
-                              cursor: "pointer",
-                              fontSize: "12px",
-                              width: "100px",
-                              fontFamily: "sans-serif",
-                            }}
-                            onClick={() => {
-                              startCHatHandler();
-                              setShowChatLock(false);
-                            }}
-                          >
-                            Accept chat
-                          </button>
-                        ) : (
-                          <button
-                            style={{
-                              marginLeft: "auto",
-                              background: waitingForAccept ? "gray" : "yellow",
-                              color: waitingForAccept ? "#fff" : "#000",
-                              border: "none",
-                              padding: "8px 16px",
-                              borderRadius: "6px",
-                              cursor: "pointer",
-                              fontSize: "12px",
-                              width: "100px",
-                              fontFamily: "sans-serif",
-                            }}
-                            disabled={waitingForAccept ? true : false}
-                            onClick={() => {
-                              sendChat("Hello");
-                              setWaitingForAccept(true);
-                              setTimeout(() => {
-                                setWaitingForAccept(false);
-                              }, 60000);
-                            }}
-                          >
-                            {waitingForAccept ? "Wait" : "start chat"}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  )}
 
                   {chatMessagesData.length === 0 ? (
                     <div className={styles.emptyChatState}>
                       <p className={styles.emptyChatText}>
-                        No messages yet. Start the conversation!
+                        No messages yet.
                       </p>
                     </div>
                   ) : (
                     <>
-                      {chatMessagesData.map((message) => {
+                      {chatMessagesData.map((message, index) => {
                         const isOwn = message.senderId === clientId;
+                        const prevMessage = chatMessagesData[index - 1];
+                        const grouped =
+                          !!prevMessage &&
+                          String(prevMessage.senderId) === String(message.senderId);
                         const timestamp = new Date(
                           message.timestamp,
                         ).toLocaleTimeString([], {
@@ -707,12 +622,12 @@ const UserChat = () => {
                         return (
                           <div
                             key={message._id}
-                            className={`${styles.messageContainer} ${isOwn ? styles.messageContainerRight : styles.messageContainerLeft}`}
+                            className={`${styles.messageContainer} ${isOwn ? styles.messageContainerRight : styles.messageContainerLeft} ${grouped ? styles.messageContainerGrouped : ""}`}
                           >
                             <div
                               className={`${styles.messageBubble} ${isOwn ? styles.messageBubbleOwn : styles.messageBubbleOther}`}
                             >
-                              {!isOwn && (
+                              {!isOwn && !grouped && (
                                 <div className={styles.messageSender}>
                                   {consultantOverview?.consultant?.fullname ||
                                     "Consultant"}
@@ -732,10 +647,61 @@ const UserChat = () => {
                   )}
                 </div>
 
+                {/* Session gate — outside the scroll area, above the composer */}
+                  {showChatLock && (
+                    <div className={styles.chatSessionAction}>
+                      <div className={styles.chatEndBox}>
+                        <div className={styles.lockWrapper}>
+                          <div className={styles.lockIcon}>{waitingForAccept ? "⏳" : "🔒"}</div>
+                          {waitingForAccept && (
+                            <div className={styles.reverseRing}></div>
+                          )}
+                        </div>
+                        <div className={styles.chatEndContent}>
+                          <h4>{isLock ? "Consultant is ready" : "Start a chat session"}</h4>
+                          <p>
+                            {isLock
+                              ? "Accept to begin the timed session."
+                              : waitingForAccept
+                                ? "Waiting for the consultant to accept…"
+                                : "Send a request and the consultant will accept shortly."}
+                          </p>
+                        </div>
+                        {isLock ? (
+                          <button
+                            type="button"
+                            className={styles.chatEndButtonAccept}
+                            onClick={() => {
+                              startCHatHandler();
+                              setShowChatLock(false);
+                            }}
+                          >
+                            Accept chat
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className={`${styles.chatEndButtonStart} ${waitingForAccept ? styles.chatEndButtonWaiting : ""}`}
+                            disabled={waitingForAccept ? true : false}
+                            onClick={() => {
+                              sendChat("Hello");
+                              setWaitingForAccept(true);
+                              setTimeout(() => {
+                                setWaitingForAccept(false);
+                              }, 60000);
+                            }}
+                          >
+                            {waitingForAccept ? "Waiting…" : "Start chat"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                 {/* Message Input */}
                 <div className={styles.messageInputArea}>
-                  <div className={styles.inputGroup}>
-                    <button className={styles.attachButton} title="Attach File">
+                  <div className={`${styles.inputGroup} ${canSend ? "" : styles.inputGroupDisabled}`}>
+                    <button type="button" className={styles.attachButton} title="Attach File" disabled={!canSend}>
                       <svg
                         width="20"
                         height="20"
@@ -752,17 +718,27 @@ const UserChat = () => {
                       value={text || ""}
                       type="text"
                       className={styles.messageInput}
-                      placeholder="Type a message..."
+                      placeholder={
+                        canSend
+                          ? "Type a message..."
+                          : waitingForAccept
+                            ? "Waiting for the consultant to accept…"
+                            : "Start a chat session to send messages"
+                      }
+                      disabled={!canSend}
+                      aria-disabled={!canSend}
                       onKeyPress={(e) => {
-                        if (e.key === "Enter" && text?.trim()) {
+                        if (canSend && e.key === "Enter" && text?.trim()) {
                           sendChat();
                         }
                       }}
                     />
                     <button
-                      onClick={sendChat}
+                      type="button"
+                      onClick={() => canSend && sendChat()}
                       className={styles.sendButton}
-                      title="Send"
+                      title={canSend ? "Send" : "Start the session to send messages"}
+                      disabled={!canSend}
                     >
                       <svg
                         className={styles.sendIcon}

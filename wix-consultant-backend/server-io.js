@@ -774,6 +774,12 @@ const ioServer = (server) => {
 
     socket.on("sendMessage", async (data) => {
       const { senderId, receiverId, shop_id, text, timestamp } = data;
+      console.log("[CHAT DEBUG] sendMessage received", {
+        from: String(senderId || ""),
+        to: String(receiverId || ""),
+        shop: String(shop_id || ""),
+        boundSocketUser: socket.data.userId || null,
+      });
 
       const sid = senderId ? String(senderId) : "";
       if (
@@ -853,6 +859,11 @@ const ioServer = (server) => {
         });
 
         if (!existingChat) {
+          console.log("[CHAT DEBUG] Chat session created (ChatList, isRequest:false)", {
+            userId: String(senderId),
+            consultantId: String(receiverId),
+            shop: String(shop_id),
+          });
           await ChatList.create([
             {
               senderId,
@@ -920,7 +931,12 @@ const ioServer = (server) => {
           avatar: senderInfo?.profileImage || null,
         };
 
-        emitToUser(io, onlineUsers, receiverId, "receiveMessage", messageWithSender);
+        const deliveryInfo = await emitToUser(io, onlineUsers, receiverId, "receiveMessage", messageWithSender);
+        console.log("[CHAT DEBUG] Socket event emitted: receiveMessage →", String(receiverId), {
+          roomSockets: deliveryInfo.roomCount,
+          delivered: deliveryInfo.delivered,
+          consultantOnline: onlineUsers.has(String(receiverId)),
+        });
         if (String(senderId) !== String(receiverId)) {
           emitToUser(io, onlineUsers, senderId, "receiveMessage", messageWithSender);
         }
@@ -968,6 +984,7 @@ const ioServer = (server) => {
       user.isChatAccepted = "accepted";
       user.chatLock = false;
       await user.save();
+      console.log("[CHAT DEBUG] Chat accepted by user → starting timed session", { userId: String(userId), consultantId: String(consultantId) });
 
       const transaction = await TransactionHistroy.create({
         senderId: userId,
@@ -1053,6 +1070,7 @@ const ioServer = (server) => {
         console.log("✅ isChatAccepted updated to request");
       }
 
+      console.log("[CHAT DEBUG] Socket event emitted: acceptUser →", String(userId), { consultantId: String(consultantId) });
       io.to(userId).emit("acceptUser", {
         userId,
         shopId,

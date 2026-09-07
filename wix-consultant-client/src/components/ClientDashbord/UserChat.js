@@ -76,6 +76,7 @@ const UserChat = () => {
 
   useEffect(() => {
     if (confirmChat) {
+      console.log("[CHAT DEBUG] Consultant confirmed the request (acceptUser)", confirmChat);
       seIsLock(true);
     }
   }, [confirmChat]);
@@ -262,7 +263,7 @@ const UserChat = () => {
     ]);
 
     socket.emit("sendMessage", messageData);
-    console.log("[chat] sendMessage", messageData);
+    console.log("[CHAT DEBUG] Socket event emitted: sendMessage", { to: messageData.receiverId, shop: messageData.shop_id });
     setText("");
     shouldAutoScrollRef.current = true;
     setTimeout(() => scrollToBottom(true), 100);
@@ -330,6 +331,7 @@ const UserChat = () => {
             messageReceiverId === currentClientId));
 
       if (isCurrentChatMessage && message._id) {
+        console.log("[CHAT DEBUG] Incoming message received (user)", { from: message.senderId });
         if (message._id === lastProcessedMessageId.current) return;
         lastProcessedMessageId.current = message._id;
 
@@ -684,6 +686,7 @@ const UserChat = () => {
                             className={`${styles.chatEndButtonStart} ${waitingForAccept ? styles.chatEndButtonWaiting : ""}`}
                             disabled={waitingForAccept ? true : false}
                             onClick={() => {
+                              console.log("[CHAT DEBUG] User Start Chat clicked", { clientId, consultantId, shopId });
                               sendChat("Hello");
                               setWaitingForAccept(true);
                               setTimeout(() => {

@@ -1,43 +1,81 @@
-import React, { useState, useEffect, useRef, Fragment } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback, Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import styles from "./ChatsPage.module.css";
 import axios from "axios";
-import {
-  socket,
-  ensureSocketRegistered,
-  SOCKET_ROLE,
-} from "../Sokect-io/SokectConfig";
-import { getConsultantId, getShopId } from "../../utils/wixStorage";
-import {
-  fetchChatHistory,
-  updateUserRequestById,
-} from "../Redux/slices/ConsultantSlices";
+import { socket, ensureSocketRegistered, SOCKET_ROLE } from "../Sokect-io/SokectConfig";
+import { getConsultantId, getShopId, clearConsultantSession } from "../../utils/wixStorage";
+import { fetchChatHistory, updateUserRequestById } from "../Redux/slices/ConsultantSlices";
 import { useDispatch, useSelector } from "react-redux";
 import { addMessage, setChatTimerStopped } from "../Redux/slices/sokectSlice";
 import { BsThreeDotsVertical } from "react-icons/bs";
+import {
+  HiOutlineChatBubbleLeftRight,
+  HiOutlineArrowLeft,
+  HiOutlineMagnifyingGlass,
+  HiOutlinePaperAirplane,
+  HiOutlinePaperClip,
+} from "react-icons/hi2";
 import ReactToast from "../AlertModel/ReactToast";
-import { toast } from "react-toastify";
+
+/*
+ * Consultant chat.
+ *
+ * ARCHITECTURE (unchanged):
+ *   customer "Start chat" → socket sendMessage("Hello")
+ *     → backend creates ChatList{isRequest:false} + Message, emits
+ *       receiveMessage to both parties (room = userId)
+ *   consultant socketEventBridge → redux socket.messages (this page refetches
+ *       the chat list on every new message and shows the pending request)
+ *   consultant "Accept request" → PUT update-user-request (isRequest:true)
+ *   consultant "Accept & start" → socket conFirmChatEmit → backend emits
+ *       acceptUser to the customer → customer acceptUserChat → backend
+ *       creates the Transaction and emits chatTimerStarted to both
+ *   either side "End chat" → socket endChat → chatEnded to both
+ *
+ * Every emit, API path and payload below is the pre-existing one.
+ */
+
+const BACKEND = process.env.REACT_APP_BACKEND_HOST;
+const DEFAULT_AVATAR = "/images/flag/teamdefault.png";
+const dbg = (...a) => console.log("[CHAT DEBUG]", ...a);
+
+function resolveAvatar(raw) {
+  if (!raw) return DEFAULT_AVATAR;
+  if (/^https?:\/\//i.test(raw)) return raw.replace(/^http:\/\//i, "https://");
+  return `${BACKEND}/${String(raw).replace(/\\/g, "/")}`;
+}
+
+function formatClock(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  return sameDay
+    ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 
 const ChatsPage = () => {
-  const [selectedChat, setSelectedChat] = useState(1);
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [showChatView, setShowChatView] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [chatList, setChatList] = useState([]);
+  const [listLoaded, setListLoaded] = useState(false);
   const [chatMessagesData, setChatMessagesData] = useState([]);
   const [consultantId, setConsultantId] = useState(null);
   const [shopId, setShopId] = useState(null);
   const [chaterIds, setChaterIds] = useState(null);
   const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
   const dispatch = useDispatch();
-  const { chatHistory } = useSelector((state) => state.consultants);
+  const { chatHistory, userInRequest } = useSelector((state) => state.consultants);
   const messages = useSelector((state) => state.socket.messages);
-  const [showNotification, setShowNotification] = useState(false);
-  const [notificationMessage, setNotificationMessage] = useState(null);
-  const [showRequestModal, setShowRequestModal] = useState(false);
+  const { chatTimer } = useSelector((state) => state.socket);
   const [chatAccepted, setChatAccepted] = useState(null);
-  const lastNotificationMessageId = useRef(null);
   const lastProcessedMessageId = useRef(null);
+  const lastUnreadMessageId = useRef(null);
   const messagesEndRef = useRef(null);
   const messagesAreaRef = useRef(null);
   const [refreshed, setRefreshed] = useState(false);
@@ -45,1027 +83,663 @@ const ChatsPage = () => {
   const [showChatEndToast, setShowChatEndToast] = useState(false);
   const [showChatEndPop, setShowChatEndPop] = useState(false);
   const prevIsRunningRef = useRef(null);
-  const { userInRequest } = useSelector((state) => state.consultants);
-  const { chatTimer } = useSelector((state) => state.socket);
   const [seconds, setSeconds] = useState(0);
-  const [selectChatUser, setSelectChatUser] = useState(null);
+  const [unread, setUnread] = useState({}); // senderId -> count (session-scoped)
   const isActiveChatUser = localStorage.getItem("activeChatUserId");
   const token = localStorage.getItem("token");
-  const shop = localStorage.getItem("shop");
-  console.log("clientId", chatTimer);
+
+  /* ── identity + socket ─────────────────────────────────────── */
+
   useEffect(() => {
     const id = getConsultantId();
     const sid = getShopId();
     setConsultantId(id);
     setShopId(sid);
+    dbg("Consultant ID", id, "| shop", sid);
   }, []);
 
   useEffect(() => {
     if (!consultantId) return;
-    ensureSocketRegistered(consultantId, { role: SOCKET_ROLE.CONSULTANT });
+    ensureSocketRegistered(consultantId, { role: SOCKET_ROLE.CONSULTANT }).then((ok) => {
+      dbg("Consultant socket connected", { consultantId, ok, socketId: socket.id || "(pending)" });
+    });
   }, [consultantId]);
 
   useEffect(() => {
-    if (chatTimer.isRunning) {
-      localStorage.setItem("activeChatUserId", chatTimer.userId);
-    }
-  }, [chatTimer.isRunning]);
-
-  console.log("chatTimer", chatTimer);
+    if (chatTimer.isRunning) localStorage.setItem("activeChatUserId", chatTimer.userId);
+  }, [chatTimer.isRunning, chatTimer.userId]);
 
   useEffect(() => {
     const checkMobile = () => {
       setIsMobile(window.innerWidth <= 768);
-      if (window.innerWidth > 768) {
-        setShowChatView(false);
-      }
+      if (window.innerWidth > 768) setShowChatView(false);
     };
-
     checkMobile();
     window.addEventListener("resize", checkMobile);
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
-  const scrollToBottom = (behavior = "auto") => {
+  /* ── auth failure → back to in-app consultant login (no Shopify URLs) ── */
+
+  const handleUnauthorized = useCallback(() => {
+    clearConsultantSession();
+    localStorage.removeItem("shop");
+    const instance = localStorage.getItem("wix_instance");
+    navigate(`/login${instance ? `?instance=${encodeURIComponent(instance)}` : ""}`, { replace: true });
+  }, [navigate]);
+
+  /* ── scrolling: only the message panel ─────────────────────── */
+
+  const scrollToBottom = () => {
     if (messagesAreaRef.current) {
       messagesAreaRef.current.scrollTop = messagesAreaRef.current.scrollHeight;
     }
   };
 
+  /* ── history: guard against stale responses when switching fast ── */
+
   useEffect(() => {
-    if (chatHistory?.chatHistory) {
-      setChatMessagesData(chatHistory.chatHistory);
-      lastProcessedMessageId.current = null;
-      setTimeout(() => {
-        scrollToBottom("auto");
-      }, 300);
+    if (!chatHistory?.chatHistory) return;
+    const rows = chatHistory.chatHistory;
+    // Only accept a history that actually belongs to the open conversation.
+    if (chaterIds && rows.length) {
+      const belongs = rows.every(
+        (m) =>
+          [String(m.senderId), String(m.receiverId)].includes(String(chaterIds.userId)) &&
+          String(m.shop_id) === String(chaterIds.shopId),
+      );
+      if (!belongs) {
+        dbg("Ignored stale history for a different conversation");
+        return;
+      }
     }
+    setChatMessagesData(rows);
+    lastProcessedMessageId.current = null;
+    dbg("Messages loaded", { count: rows.length });
+    setTimeout(scrollToBottom, 300);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatHistory]);
 
   useEffect(() => {
     if (chatMessagesData.length > 0 && messagesAreaRef.current) {
-      setTimeout(() => {
-        scrollToBottom("auto");
-      }, 100);
+      const t = setTimeout(scrollToBottom, 100);
+      return () => clearTimeout(t);
     }
   }, [chatMessagesData]);
 
-  useEffect(() => {
-    if (!chaterIds || !consultantId || !messages.length) return;
-
-    const latestMessage = messages[messages.length - 1];
-
-    if (latestMessage._id === lastProcessedMessageId.current) return;
-
-    const isCurrentChatMessage =
-      String(latestMessage.shop_id) === String(chaterIds.shopId) &&
-      ((String(latestMessage.senderId) === String(chaterIds.userId) &&
-        String(latestMessage.receiverId) === String(consultantId)) ||
-        (String(latestMessage.senderId) === String(consultantId) &&
-          String(latestMessage.receiverId) === String(chaterIds.userId)));
-
-    if (isCurrentChatMessage) {
-      lastProcessedMessageId.current = latestMessage._id;
-      setChatMessagesData((prev) => {
-        const messageExists = prev.some((msg) => msg._id === latestMessage._id);
-        if (messageExists) {
-          return prev;
-        }
-        const tempMessageIndex = prev.findIndex(
-          (msg) =>
-            msg._id?.startsWith("temp-") &&
-            msg.text === latestMessage.text &&
-            String(msg.senderId) === String(latestMessage.senderId),
-        );
-
-        if (tempMessageIndex !== -1) {
-          const newMessages = [...prev];
-          newMessages[tempMessageIndex] = latestMessage;
-          return newMessages;
-        }
-
-        return [...prev, latestMessage];
-      });
-    }
-  }, [messages, chaterIds, consultantId]);
+  /* ── live messages → open conversation + unread counters ───── */
 
   useEffect(() => {
-    if (selectedChat && chatList.length > 0) {
-      const conversation = chatList.find((conv) => conv.id === selectedChat);
-      console.log(conversation);
-      if (conversation) {
+    if (!consultantId || !messages.length) return;
+    const latest = messages[messages.length - 1];
+    if (!latest) return;
+
+    const isIncoming = String(latest.senderId) !== String(consultantId);
+    const forOpenChat =
+      chaterIds &&
+      String(latest.shop_id) === String(chaterIds.shopId) &&
+      ((String(latest.senderId) === String(chaterIds.userId) &&
+        String(latest.receiverId) === String(consultantId)) ||
+        (String(latest.senderId) === String(consultantId) &&
+          String(latest.receiverId) === String(chaterIds.userId)));
+
+    if (isIncoming && latest._id && latest._id !== lastUnreadMessageId.current) {
+      lastUnreadMessageId.current = latest._id;
+      dbg("Incoming message received", { from: latest.senderId, forOpenChat: Boolean(forOpenChat) });
+      if (!forOpenChat) {
+        const key = String(latest.senderId);
+        setUnread((prev) => ({ ...prev, [key]: (prev[key] || 0) + 1 }));
       }
     }
-  }, [selectedChat]);
 
-  const handleBackToList = () => {
-    setShowChatView(false);
-  };
+    if (!forOpenChat) return;
+    if (latest._id && latest._id === lastProcessedMessageId.current) return;
+    lastProcessedMessageId.current = latest._id || null;
 
-  const selectedConversation = chaterIds
-    ? chatList.find(
-        (conv) =>
-          String(conv.sender?.id) === String(chaterIds.userId) &&
-          String(conv.shop?.id) === String(chaterIds.shopId),
-      )
-    : chatList.find((conv) => conv.id === selectedChat);
+    setChatMessagesData((prev) => {
+      if (latest._id && prev.some((m) => m._id === latest._id)) return prev;
+      const tempIndex = prev.findIndex(
+        (m) =>
+          m._id?.startsWith("temp-") &&
+          m.text === latest.text &&
+          String(m.senderId) === String(latest.senderId),
+      );
+      if (tempIndex !== -1) {
+        const next = [...prev];
+        next[tempIndex] = latest;
+        return next;
+      }
+      return [...prev, latest];
+    });
+  }, [messages, chaterIds, consultantId]);
 
-  const filteredConversations = chatList.filter((conv) =>
-    conv.sender?.fullname?.toLowerCase().includes(searchQuery.toLowerCase()),
-  );
-  useEffect(() => {
-    if (selectedConversation) {
-      setSelectChatUser(selectedConversation.sender.id);
-      localStorage.setItem("___U-B", selectedConversation.sender.id);
-    }
-  }, [selectedConversation]);
+  /* ── chat list ─────────────────────────────────────────────── */
 
-  const getChatList = async () => {
+  const getChatList = useCallback(async () => {
     if (!shopId || !consultantId) return;
-
     try {
       const response = await axios.get(
-        `${process.env.REACT_APP_BACKEND_HOST}/api/api-consultant/get/chat-list/${shopId}/${consultantId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
+        `${BACKEND}/api/api-consultant/get/chat-list/${shopId}/${consultantId}`,
+        { headers: { Authorization: `Bearer ${token}` } },
       );
       if (response.data?.payload) {
         setChatList(response.data.payload);
-        console.log("chatList", response.data.payload);
-        if (response.data.payload.length > 0) {
-          const firstChat = response.data.payload[0];
-          // setSelectedChat(firstChat.id);
-        }
+        dbg("Chat list loaded", {
+          total: response.data.payload.length,
+          pending: response.data.payload.filter((c) => c.isRequest === false).length,
+        });
       }
     } catch (error) {
-      if (error.response.status === 401) {
-        localStorage.removeItem("token");
-        localStorage.removeItem("shop");
-        window.location.href = `https://${shop}/apps/consultant-theme/login`;
-      }
-      console.log("error", error);
+      if (error.response?.status === 401) handleUnauthorized();
+      else console.error("[CHAT DEBUG] chat list failed:", error.message);
+    } finally {
+      setListLoaded(true);
     }
-  };
+  }, [shopId, consultantId, token, handleUnauthorized]);
 
   useEffect(() => {
     getChatList();
-  }, [messages, userInRequest, shopId, consultantId, chatAccepted, refreshed]);
+  }, [getChatList, messages, userInRequest, chatAccepted, refreshed]);
 
-  const sendChat = async () => {
-    if (text.trim() === "" || !chaterIds) return;
-    const cid = consultantId;
-    if (!cid) return;
-
-    const ok = await ensureSocketRegistered(cid, {
-      role: SOCKET_ROLE.CONSULTANT,
-    });
-    if (!ok) {
-      console.error("[chat] consultant socket register failed");
-      return;
-    }
-
-    const messageData = {
-      senderId: cid,
-      receiverId: chaterIds?.userId,
-      shop_id: shopId || chaterIds?.shopId,
-      text: text,
-      timestamp: new Date().toISOString(),
-    };
-    socket.emit("sendMessage", messageData);
-    setText("");
-    dispatch(addMessage(messageData));
-  };
+  const selectedConversation = useMemo(
+    () =>
+      chaterIds
+        ? chatList.find(
+            (conv) =>
+              String(conv.sender?.id) === String(chaterIds.userId) &&
+              String(conv.shop?.id) === String(chaterIds.shopId),
+          )
+        : null,
+    [chatList, chaterIds],
+  );
 
   useEffect(() => {
-    if (messages && messages.length > 0) {
-      const latestMessage = messages[messages.length - 1];
+    if (selectedConversation) localStorage.setItem("___U-B", selectedConversation.sender.id);
+  }, [selectedConversation]);
 
-      if (latestMessage._id === lastNotificationMessageId.current) return;
+  const filteredConversations = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const rows = q
+      ? chatList.filter((c) => c.sender?.fullname?.toLowerCase().includes(q))
+      : chatList;
+    // Pending requests first, then most recent.
+    return [...rows].sort((a, b) => {
+      const pa = a.isRequest === false ? 0 : 1;
+      const pb = b.isRequest === false ? 0 : 1;
+      if (pa !== pb) return pa - pb;
+      return new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0);
+    });
+  }, [chatList, searchQuery]);
 
-      const isIncomingMessage =
-        String(latestMessage.senderId) !== String(consultantId);
+  const pendingCount = useMemo(() => chatList.filter((c) => c.isRequest === false).length, [chatList]);
 
-      let isCurrentChatMessage = true;
-      if (chaterIds) {
-        isCurrentChatMessage =
-          String(latestMessage.shop_id) === String(chaterIds.shopId) &&
-          ((String(latestMessage.senderId) === String(chaterIds.userId) &&
-            String(latestMessage.receiverId) === String(consultantId)) ||
-            (String(latestMessage.senderId) === String(consultantId) &&
-              String(latestMessage.receiverId) === String(chaterIds.userId)));
-      }
+  /* ── actions (emits/APIs unchanged) ────────────────────────── */
 
-      if (isIncomingMessage) {
-        const senderConversation = chatList.find(
-          (conv) =>
-            conv.sender?.id === latestMessage.senderId &&
-            conv.shop?.id === latestMessage.shop_id,
-        );
-
-        const senderName = senderConversation?.sender?.fullname || "User";
-        const senderAvatar = senderConversation?.sender?.profileImage
-          ? `${process.env.REACT_APP_BACKEND_HOST}/${senderConversation.sender.profileImage.replace("\\", "/")}`
-          : null;
-
-        setNotificationMessage({
-          senderName: senderName,
-          text: latestMessage.text,
-          avatar: senderAvatar,
-        });
-
-        setShowNotification(true);
-
-        lastNotificationMessageId.current = latestMessage._id;
-
-        setTimeout(() => {
-          setShowNotification(false);
-        }, 5000);
-      }
-    }
-  }, [messages, consultantId, chaterIds, chatList]);
+  const handleChatSelect = (chatData) => {
+    dbg("Conversation selected", chatData);
+    setChaterIds(chatData);
+    setChatAccepted(chatData);
+    setUnread((prev) => {
+      if (!prev[String(chatData.userId)]) return prev;
+      const next = { ...prev };
+      delete next[String(chatData.userId)];
+      return next;
+    });
+    setChatMessagesData([]);
+    if (isMobile) setShowChatView(true);
+    dbg("Loading conversation history", { shopId: chatData.shopId, userId: chatData.userId, consultantId });
+    dispatch(fetchChatHistory({ shopId: chatData.shopId, userId: chatData.userId, consultantId }));
+  };
 
   const updateUser = (conversation) => {
-    console.log("conversation", conversation);
+    dbg("Accepting chat request", { userId: conversation.sender.id, shopId: conversation.shop.id });
     dispatch(
       updateUserRequestById({
         shopId: conversation.shop.id,
         userId: conversation.sender.id,
-        consultantId: consultantId,
-        token: token,
-        shop: shop,
+        consultantId,
+        token,
+        shop: localStorage.getItem("shop"),
       }),
     );
     setUserControlMenu(null);
     setRefreshed((prev) => !prev);
   };
 
-  const isRequestModalOpen = chatList.filter(
-    (conversation) => conversation.isRequest === false,
-  );
-  const isRequestModalClose = chatList.filter(
-    (conversation) => conversation.isRequest === true,
-  );
-
-  const handleChatSelect = (chatData) => {
-    setChaterIds(chatData);
-    setChatAccepted(chatData);
-    const conversation = chatList.find(
-      (conv) =>
-        conv.sender?.id === chatData.userId &&
-        conv.shop?.id === chatData.shopId,
-    );
-
-    if (conversation) {
-      setSelectedChat(conversation.id);
-      if (isMobile) {
-        setShowChatView(true);
+  const sendChat = async () => {
+    const body = text.trim();
+    if (!body || !chaterIds || !consultantId || sending) return;
+    setSending(true);
+    try {
+      const ok = await ensureSocketRegistered(consultantId, { role: SOCKET_ROLE.CONSULTANT });
+      if (!ok) {
+        console.error("[CHAT DEBUG] consultant socket register failed — message not sent");
+        return;
       }
-      window.scrollTo(0, 0);
-      dispatch(
-        fetchChatHistory({
-          shopId: chatData.shopId,
-          userId: chatData.userId,
-          consultantId: consultantId,
-        }),
-      );
+      const messageData = {
+        senderId: consultantId,
+        receiverId: chaterIds.userId,
+        shop_id: shopId || chaterIds.shopId,
+        text: body,
+        timestamp: new Date().toISOString(),
+      };
+      socket.emit("sendMessage", messageData);
+      dbg("Socket event emitted: sendMessage", { to: messageData.receiverId });
+      setText("");
+      // Optimistic echo with a temp id so the server copy REPLACES it instead
+      // of duplicating it (the server echoes receiveMessage to the sender too).
+      dispatch(addMessage({ _id: `temp-${Date.now()}`, ...messageData }));
+    } finally {
+      setSending(false);
     }
   };
 
   const acceptUserChat = (data) => {
     if (!data || !consultantId) return;
-    console.log("data_______________________✅", data);
-    const acceptDataIds = {
-      userId: data.userId,
-      shopId: data.shopId,
-      consultantId: consultantId,
-    };
+    const acceptDataIds = { userId: data.userId, shopId: data.shopId, consultantId };
     socket.emit("conFirmChatEmit", acceptDataIds);
-    // socket.emit("acceptUserChat", acceptDataIds);
+    dbg("Socket event emitted: conFirmChatEmit", acceptDataIds);
     setChatAccepted((prev) => !prev);
   };
 
   useEffect(() => {
-    if (socket) {
-      socket.on("userChatAccepted", (response) => {
-        console.log("acceptUserChat", response);
-      });
-    }
-  }, [socket]);
-
-  useEffect(() => {
     if (!chatTimer.isRunning || !chatTimer.startTime) return;
-    console.log("chatTimer", chatTimer);
     const interval = setInterval(() => {
-      const diff = Math.floor(
-        (Date.now() - new Date(chatTimer.startTime)) / 1000,
-      );
-      setSeconds(diff);
+      setSeconds(Math.floor((Date.now() - new Date(chatTimer.startTime)) / 1000));
     }, 1000);
-    if (chatTimer?.isRunning === false) {
-      setChatAccepted((prev) => !prev);
-      localStorage.removeItem("activeChatUserId");
-    }
-
     return () => clearInterval(interval);
   }, [chatTimer.isRunning, chatTimer.startTime]);
 
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
+
   const stopChatTimer = async () => {
     const uid = chaterIds?.userId || chatTimer.userId;
     const cid = consultantId;
     const sid = chatTimer.shopId || chaterIds?.shopId || shopId;
     const tid = chatTimer.transactionId;
-
     if (!tid || !uid || !cid || !sid) {
-      console.error("[chat] stopChat — missing ids", { tid, uid, cid, sid });
+      console.error("[CHAT DEBUG] stopChat — missing ids", { tid, uid, cid, sid });
       return;
     }
-
     dispatch(setChatTimerStopped());
     setSeconds(0);
     localStorage.removeItem("chatTimer");
     localStorage.removeItem("activeChatUserId");
     localStorage.removeItem("___U-B");
-
-    const ok = await ensureSocketRegistered(cid, {
-      role: SOCKET_ROLE.CONSULTANT,
-    });
+    const ok = await ensureSocketRegistered(cid, { role: SOCKET_ROLE.CONSULTANT });
     if (!ok) {
-      console.error("[chat] consultant register failed — endChat not sent");
+      console.error("[CHAT DEBUG] consultant register failed — endChat not sent");
       return;
     }
-
-    socket.emit("endChat", {
-      transactionId: tid,
-      userId: uid,
-      consultantId: cid,
-      shopId: sid,
-    });
-
+    socket.emit("endChat", { transactionId: tid, userId: uid, consultantId: cid, shopId: sid });
+    dbg("Socket event emitted: endChat", { tid });
     setRefreshed((prev) => !prev);
-    getChatList();
     setShowChatEndPop(true);
-  };
-  const handlerUserControlMenu = (conversation) => {
-    setUserControlMenu((prev) =>
-      prev === conversation?.chatListId ? null : conversation?.chatListId,
-    );
   };
 
   const HandleRemoveUser = async (conversation) => {
-    const senderId = conversation?.sender?.id;
     try {
       const response = await axios.delete(
-        `${process.env.REACT_APP_BACKEND_HOST}/api/api-consultant/remove/user/chat-list/${conversation.chatListId}/${senderId}`,
+        `${BACKEND}/api/api-consultant/remove/user/chat-list/${conversation.chatListId}/${conversation?.sender?.id}`,
       );
       if (response.status === 200 || response.status === 204) {
         setUserControlMenu(null);
-        window.location.reload();
+        if (String(chaterIds?.userId) === String(conversation?.sender?.id)) {
+          setChaterIds(null);
+          setChatMessagesData([]);
+        }
+        setRefreshed((prev) => !prev);
       }
     } catch (error) {
-      console.log("error", error);
+      console.error("[CHAT DEBUG] remove failed:", error.message);
     }
   };
+
   useEffect(() => {
     if (prevIsRunningRef.current === true && chatTimer.isRunning === false) {
       setShowChatEndToast(true);
-      getChatList();
       setShowChatEndPop(true);
       localStorage.removeItem("activeChatUserId");
+      setRefreshed((prev) => !prev);
     }
     prevIsRunningRef.current = chatTimer.isRunning;
   }, [chatTimer.isRunning]);
 
   useEffect(() => {
-    if (chatTimer.isRunning) {
-      localStorage.setItem("chatTimer", JSON.stringify(chatTimer));
-    }
-  }, [chatTimer.isRunning]);
+    if (chatTimer.isRunning) localStorage.setItem("chatTimer", JSON.stringify(chatTimer));
+  }, [chatTimer]);
+
+  // Close the per-row menu on outside click / Escape
+  useEffect(() => {
+    if (!userControlMenu) return;
+    const close = () => setUserControlMenu(null);
+    const onKey = (e) => e.key === "Escape" && close();
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [userControlMenu]);
+
+  /* ── derived ───────────────────────────────────────────────── */
 
   const currentUserId = localStorage.getItem("activeChatUserId");
+  const timerRunningForOpen =
+    chatTimer.isRunning && String(isActiveChatUser) === String(selectedConversation?.sender?.id);
+  const requestPendingInWindow = chatAccepted?.isChatAccepted === "request";
+  const canSend = Boolean(chaterIds) && !showChatEndPop;
 
-  const hasMatchedUser = isRequestModalClose?.some(
-    (conv) => conv?.sender?.id === currentUserId,
-  );
+  /* ── render ────────────────────────────────────────────────── */
+
+  const renderConversation = (conversation) => {
+    const senderId = conversation.sender?.id;
+    const pending = conversation.isRequest === false;
+    const isSelected = String(senderId) === String(chaterIds?.userId);
+    const lockedByOtherSession =
+      chatTimer.isRunning && currentUserId && String(senderId) !== String(currentUserId);
+    const count = unread[String(senderId)] || 0;
+    const select = () => {
+      if (lockedByOtherSession) return;
+      handleChatSelect({
+        shopId: conversation.shop.id,
+        userId: senderId,
+        isChatAccepted: conversation.isChatAccepted,
+      });
+    };
+
+    return (
+      <div
+        key={conversation.chatListId || senderId}
+        role="button"
+        tabIndex={0}
+        onClick={select}
+        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && select()}
+        className={[
+          styles.conversationItem,
+          isSelected ? styles.conversationItemActive : "",
+          lockedByOtherSession ? styles.disabledItem : "",
+          pending ? styles.conversationPending : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        aria-current={isSelected ? "true" : undefined}
+      >
+        <div className={styles.avatarWrapper}>
+          <img src={resolveAvatar(conversation.sender?.profileImage)} alt="" className={styles.conversationAvatar} />
+          {conversation.sender?.isActive && <span className={styles.onlineIndicator} />}
+        </div>
+        <div className={styles.conversationDetails}>
+          <div className={styles.conversationHeader}>
+            <span className={styles.conversationName}>{conversation.sender?.fullname || "Client"}</span>
+            <span className={styles.conversationTimestamp}>{formatClock(conversation.updatedAt)}</span>
+          </div>
+          <div className={styles.conversationMessage}>
+            <span className={styles.previewText}>{conversation.lastMessage || "No messages yet"}</span>
+            {pending ? (
+              <span className={styles.requestPill}>New request</span>
+            ) : count > 0 ? (
+              <span className={styles.unreadBadge} aria-label={`${count} unread`}>{count}</span>
+            ) : null}
+          </div>
+          {pending && (
+            <div className={styles.rowActions}>
+              <button
+                type="button"
+                className={styles.acceptInline}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  updateUser(conversation);
+                  select();
+                }}
+              >
+                Accept request
+              </button>
+              <button
+                type="button"
+                className={styles.declineInline}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  HandleRemoveUser(conversation);
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+        </div>
+        {!pending && (
+          <div className={styles.moreMenuWrapper} onMouseDown={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className={styles.unreadBadgeIcon}
+              aria-label="Conversation options"
+              onClick={(e) => {
+                e.stopPropagation();
+                setUserControlMenu((prev) => (prev === conversation.chatListId ? null : conversation.chatListId));
+              }}
+            >
+              <BsThreeDotsVertical />
+            </button>
+            {userControlMenu === conversation.chatListId && (
+              <div className={styles.moreMenu} role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={styles.moreMenuItem}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    HandleRemoveUser(conversation);
+                  }}
+                >
+                  Remove conversation
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <Fragment>
       <div className={styles.pageContainer}>
         <div className={styles.headerSection}>
-          <h1 className={styles.pageTitle}>Messages</h1>
+          <h1 className={styles.pageTitle}>Chats</h1>
           <p className={styles.pageDescription}>
-            Communicate with clients and manage your conversations.
+            Manage your client conversations.
+            {pendingCount > 0 && (
+              <span className={styles.pendingNote}>
+                {" "}· {pendingCount} new {pendingCount === 1 ? "request" : "requests"}
+              </span>
+            )}
           </p>
         </div>
+
         <div className={styles.chatLayout}>
-          {/* Conversations Sidebar */}
-          <div
-            className={`${styles.conversationsSidebar} ${showChatView ? styles.hideOnMobile : ""}`}
-          >
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                height: "100%",
-              }}
-            >
-              {/* Search Bar */}
-              <div className={styles.searchBar}>
-                <div className={styles.searchInputWrapper}>
-                  <svg
-                    className={styles.searchIcon}
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                  >
-                    <circle cx="11" cy="11" r="8" />
-                    <path d="m21 21-4.35-4.35" />
-                  </svg>
-                  <input
-                    type="text"
-                    className={styles.searchInput}
-                    placeholder="Search conversations..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
+          {/* ── Client list ── */}
+          <aside className={`${styles.conversationsSidebar} ${showChatView ? styles.hideOnMobile : ""}`}>
+            <div className={styles.searchBar}>
+              <div className={styles.searchInputWrapper}>
+                <HiOutlineMagnifyingGlass className={styles.searchIcon} />
+                <input
+                  type="search"
+                  className={styles.searchInput}
+                  placeholder="Search clients"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className={styles.conversationsList}>
+              {!listLoaded ? (
+                <div className={styles.emptyState}>
+                  <p className={styles.emptyText}>Loading conversations…</p>
                 </div>
-              </div>
-
-              <div
-                style={{
-                  width: "100%",
-                  display: "flex",
-                  justifyContent: "end",
-                }}
-              >
-                {isRequestModalOpen.length > 0 && (
-                  <p
-                    onClick={() => setShowRequestModal(!showRequestModal)}
-                    style={{
-                      fontSize: "14px",
-                      fontWeight: "600",
-                      padding: "10px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    {" "}
-                    <span style={{ color: "#067647" }}> New requests</span> (
-                    {isRequestModalOpen.length})
+              ) : filteredConversations.length === 0 ? (
+                <div className={styles.emptyState}>
+                  <HiOutlineChatBubbleLeftRight className={styles.emptyIcon} />
+                  <p className={styles.emptyTitle}>{searchQuery ? "No matches" : "No conversations yet"}</p>
+                  <p className={styles.emptyText}>
+                    {searchQuery
+                      ? "Try a different name."
+                      : "When clients start a consultation, their conversations will appear here."}
                   </p>
-                )}
-              </div>
-              {showRequestModal ? (
-                isRequestModalOpen?.map((conversation) => {
-                  const imageUrl = `${process.env.REACT_APP_BACKEND_HOST}/${conversation?.sender?.profileImage?.replace("\\", "/")}`;
-                  const isImage = conversation?.sender?.profileImage
-                    ? true
-                    : false;
-                  const updatedAt = new Date(
-                    conversation?.updatedAt,
-                  ).toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    hour12: true,
-                  });
-                  return (
-                    <Fragment>
-                      <div
-                        key={conversation.id}
-                        className={`${styles.conversationItem} ${selectedChat === conversation.id ? styles.conversationItemActive : ""}`}
-                      >
-                        <div className={styles.conversationContent}>
-                          <div className={styles.avatarWrapper}>
-                            <img
-                              src={
-                                isImage
-                                  ? imageUrl
-                                  : "https://imgs.search.brave.com/W_YLXhNT3XwZb2G3RPN5rqxKXEP-wceUf5ZHHgMt2mk/rs:fit:860:0:0:0/g:ce/aHR0cHM6Ly9zdGF0/aWMudmVjdGVlenku/Y29tL3N5c3RlbS9y/ZXNvdXJjZXMvdGh1/bWJuYWlscy8wNDgv/OTI2LzA4NC9zbWFs/bC9zaWx2ZXItbWVt/YmVyc2hpcC1pY29u/LWRlZmF1bHQtYXZh/dGFyLXByb2ZpbGUt/aWNvbi1tZW1iZXJz/aGlwLWljb24tc29j/aWFsLW1lZGlhLXVz/ZXItaW1hZ2UtaWxs/dXN0cmF0aW9uLXZl/Y3Rvci5qcGc"
-                              }
-                              alt="profile"
-                              className={styles.conversationAvatar}
-                            />
-                            {conversation.isActive && (
-                              <div className={styles.onlineIndicator}></div>
-                            )}
-                          </div>
-                          <div className={styles.conversationDetails}>
-                            <div
-                              className={`${styles.conversationHeader} ${styles.flexBetween} ${styles.flexStart}`}
-                            >
-                              <div className={styles.conversationName}>
-                                {conversation.sender?.fullname}
-                              </div>
-                              <div className={styles.conversationTimestamp}>
-                                {updatedAt}
-                              </div>
-                            </div>
-                            <div
-                              className={`${styles.conversationMessage} ${styles.flexBetween} ${styles.flexCenter}`}
-                            >
-                              <div className={styles.messageText}>
-                                {conversation?.lastMessage}
-                              </div>
+                </div>
+              ) : (
+                filteredConversations.map(renderConversation)
+              )}
+            </div>
+          </aside>
 
-                              <div className={styles.moreMenuWrapper}>
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    gap: "10px",
-                                  }}
-                                >
-                                  <button
-                                    type="button"
-                                    className={styles.acceptBtn}
-                                    onClick={() => {
-                                      updateUser(conversation);
-                                      setShowRequestModal(!showRequestModal);
-                                    }}
-                                  >
-                                    Accept
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className={styles.unreadBadgeIcon}
-                                    onClick={(e) => {
-                                      handlerUserControlMenu(conversation);
-                                    }}
-                                  >
-                                    <BsThreeDotsVertical />
-                                  </button>
-                                </div>
-                                {userControlMenu ===
-                                  conversation?.chatListId && (
-                                  <div
-                                    className={styles.moreMenu}
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    <button
-                                      type="button"
-                                      className={styles.moreMenuItem}
-                                      onClick={() => {
-                                        updateUser(conversation);
-                                        setShowRequestModal(false);
-                                      }}
-                                    >
-                                      Add
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className={styles.moreMenuItem}
-                                      onClick={() => {
-                                        HandleRemoveUser(conversation);
-                                      }}
-                                    >
-                                      Remove
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
+          {/* ── Conversation ── */}
+          <section className={`${styles.chatWindow} ${!showChatView ? styles.hideOnMobile : ""}`}>
+            {selectedConversation ? (
+              <>
+                <div className={styles.chatHeader}>
+                  <button
+                    type="button"
+                    className={styles.mobileBackButton}
+                    onClick={() => setShowChatView(false)}
+                    aria-label="Back to conversations"
+                  >
+                    <HiOutlineArrowLeft />
+                  </button>
+                  <div className={styles.chatHeaderInfo}>
+                    <div className={styles.avatarWrapper}>
+                      <img
+                        src={resolveAvatar(selectedConversation.sender?.profileImage)}
+                        alt=""
+                        className={styles.chatHeaderAvatar}
+                      />
+                      {selectedConversation.sender?.isActive && <span className={styles.onlineIndicator} />}
+                    </div>
+                    <div className={styles.chatHeaderText}>
+                      <div className={styles.chatHeaderName}>{selectedConversation.sender?.fullname || "Client"}</div>
+                      <div
+                        className={`${styles.chatHeaderStatus} ${selectedConversation.sender?.isActive ? styles.statusOnline : ""}`}
+                      >
+                        {selectedConversation.sender?.isActive ? "Online" : "Offline"}
+                      </div>
+                    </div>
+                  </div>
+                  {timerRunningForOpen && (
+                    <div className={styles.timer}>
+                      <span className={styles.timerValue}>
+                        {minutes}:{String(remainingSeconds).padStart(2, "0")}
+                      </span>
+                      <button type="button" onClick={stopChatTimer} className={styles.dangerBtn}>
+                        End chat
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className={styles.messagesArea} ref={messagesAreaRef}>
+                  {chatMessagesData.length === 0 ? (
+                    <div className={styles.emptyChatState}>
+                      <p className={styles.emptyText}>No messages yet.</p>
+                    </div>
+                  ) : (
+                    chatMessagesData.map((message, index) => {
+                      const isOwn = String(message.senderId) === String(consultantId);
+                      const prev = chatMessagesData[index - 1];
+                      const grouped = !!prev && String(prev.senderId) === String(message.senderId);
+                      return (
+                        <div
+                          key={message._id || index}
+                          className={`${styles.messageContainer} ${isOwn ? styles.messageContainerRight : styles.messageContainerLeft} ${grouped ? styles.messageContainerGrouped : ""}`}
+                        >
+                          <div className={`${styles.messageBubble} ${isOwn ? styles.messageBubbleOwn : styles.messageBubbleOther}`}>
+                            <div className={styles.messageText}>{message.text}</div>
+                            <div className={styles.messageTimestamp}>
+                              {new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                             </div>
                           </div>
                         </div>
-                      </div>
-                    </Fragment>
-                  );
-                })
-              ) : (
-                <div className={styles.conversationsList}>
-                  {isRequestModalClose.length === 0 ? (
-                    <div className={styles.emptyState}>
-                      <div>
-                        <svg
-                          className={styles.emptyIcon}
-                          width="48"
-                          height="48"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                        >
-                          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                        </svg>
-                        <p className={styles.emptyText}>
-                          Loading conversations...
-                        </p>
-                      </div>
-                    </div>
-                  ) : filteredConversations.length === 0 ? (
-                    <div className={styles.emptyState}>
-                      <div>
-                        <svg
-                          className={styles.emptyIcon}
-                          width="48"
-                          height="48"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                        >
-                          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                        </svg>
-                        <p className={styles.emptyText}>
-                          No conversations found
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    isRequestModalClose?.map((conversation) => {
-                      const imageUrl = `${process.env.REACT_APP_BACKEND_HOST}/${conversation?.sender?.profileImage?.replace("\\", "/")}`;
-                      const isImage = conversation?.sender?.profileImage
-                      
-                      const updatedAt = new Date(
-                        conversation?.updatedAt,
-                      ).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        hour12: true,
-                      });
-                      const isChatAccepted = conversation?.isChatAccepted;
-                   
-                      const isMatchedUser =
-                        conversation?.sender?.id === currentUserId;
-
-                      const shouldDisable = hasMatchedUser && !isMatchedUser;
-                      console.log("isImage", isImage);
-                      return (
-                        <Fragment>
-                          <div
-                            style={{
-                              backgroundColor: shouldDisable
-                                ? "transparent"
-                                : "rgba(74, 144, 226, 0.1)",
-                              margin: "4px",
-                              borderRadius: "11px",
-                            }}
-                            key={conversation.id}
-                            onClick={() => {
-                              if (shouldDisable) return;
-                              handleChatSelect({
-                                shopId: conversation.shop.id,
-                                userId: conversation.sender.id,
-                                isChatAccepted: conversation.isChatAccepted,
-                              });
-                            }}
-                            className={`${styles.conversationItem} 
-                            ${shouldDisable ? styles.disabledItem : ""}
-                            ${isMatchedUser ? styles.conversationItemActive : ""}
-                          `}
-                          >
-                            <div className={styles.conversationContent}>
-                              <div className={styles.avatarWrapper}>
-                                <img
-                                  src={
-                                    isImage
-                                      ? isImage
-                                      : "https://imgs.search.brave.com/W_YLXhNT3XwZb2G3RPN5rqxKXEP-wceUf5ZHHgMt2mk/rs:fit:860:0:0:0/g:ce/aHR0cHM6Ly9zdGF0/aWMudmVjdGVlenku/Y29tL3N5c3RlbS9y/ZXNvdXJjZXMvdGh1/bWJuYWlscy8wNDgv/OTI2LzA4NC9zbWFs/bC9zaWx2ZXItbWVt/YmVyc2hpcC1pY29u/LWRlZmF1bHQtYXZh/dGFyLXByb2ZpbGUt/aWNvbi1tZW1iZXJz/aGlwLWljb24tc29j/aWFsLW1lZGlhLXVz/ZXItaW1hZ2UtaWxs/dXN0cmF0aW9uLXZl/Y3Rvci5qcGc"
-                                  }
-                                  alt={selectedConversation?.sender?.fullname}
-                                  className={styles.conversationAvatar}
-                                />
-                                {conversation.sender.isActive && (
-                                  <div className={styles.onlineIndicator}></div>
-                                )}
-                              </div>
-                              <div className={styles.conversationDetails}>
-                                <div
-                                  className={`${styles.conversationHeader} ${styles.flexBetween} ${styles.flexStart}`}
-                                >
-                                  <div className={styles.conversationName}>
-                                    {conversation.sender?.fullname}
-                                  </div>
-                                  <div className={styles.conversationTimestamp}>
-                                    {updatedAt}
-                                  </div>
-                                </div>
-                                <div
-                                  className={`${styles.conversationMessage} ${styles.flexBetween} ${styles.flexCenter}`}
-                                >
-                                  <div className={styles.messageText}>
-                                    {conversation?.lastMessage}
-                                  </div>
-
-                                  <div className={styles.moreMenuWrapper}>
-                                    <button
-                                      type="button"
-                                      className={styles.unreadBadgeIcon}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setUserControlMenu((prev) =>
-                                          prev === conversation?.chatListId
-                                            ? null
-                                            : conversation?.chatListId,
-                                        );
-                                      }}
-                                    >
-                                      <BsThreeDotsVertical />
-                                    </button>
-
-                                    {userControlMenu ===
-                                      conversation?.chatListId && (
-                                      <div
-                                        className={styles.moreMenu}
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        <button
-                                          type="button"
-                                          className={styles.moreMenuItem}
-                                          onClick={() => {
-                                            HandleRemoveUser(conversation);
-                                          }}
-                                        >
-                                          Remove
-                                        </button>
-                                      </div>
-                                    )}
-                                  </div>
-                                  {/* )} */}
-                                </div>
-                                <div
-                                  className={`${styles.conversationStatus} ${conversation.isOnline ? styles.statusOnline : styles.statusOffline}`}
-                                >
-                                  {conversation.lastActive}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </Fragment>
                       );
                     })
                   )}
+                  <div ref={messagesEndRef} />
                 </div>
-              )}
-              {/* Conversations List */}
-            </div>
-          </div>
 
-          {/* Chat Window */}
-          <div
-            className={`${styles.chatWindow} ${!showChatView ? styles.hideOnMobile : ""}`}
-          >
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                height: "100%",
-              }}
-            >
-              {selectedConversation ? (
-                <>
-                  {/* Chat Header */}
-                  <div
-                    className={`${styles.chatHeader} ${styles.flexBetween} ${styles.flexCenter}`}
-                  >
-                    {/* Mobile Back Button */}
-                    <button
-                      className={styles.mobileBackButton}
-                      onClick={handleBackToList}
-                      aria-label="Back to conversations"
-                    >
-                      <svg
-                        width="20"
-                        height="20"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.5"
-                      >
-                        <path d="M19 12H5M12 19l-7-7 7-7" />
-                      </svg>
+                {/* Session strip — outside the scroll area, above the composer */}
+                {showChatEndPop ? (
+                  <div className={styles.sessionStrip}>
+                    <div className={styles.chatRequestBox}>
+                      <div className={styles.chatIcon}>✓</div>
+                      <div className={styles.chatRequestContent}>
+                        <h4>Chat ended</h4>
+                        <p>The session has been closed and billed.</p>
+                      </div>
+                      <button type="button" onClick={() => setShowChatEndPop(false)} className={styles.acceptBtn}>
+                        OK
+                      </button>
+                    </div>
+                  </div>
+                ) : requestPendingInWindow ? (
+                  <div className={styles.sessionStrip}>
+                    <div className={styles.chatRequestBox}>
+                      <div className={styles.chatIcon}>💬</div>
+                      <div className={styles.chatRequestContent}>
+                        <h4>Client is waiting to start</h4>
+                        <p>Accept to invite the client to begin the timed session.</p>
+                      </div>
+                      <button type="button" onClick={() => acceptUserChat(chatAccepted)} className={styles.acceptBtn}>
+                        Accept &amp; start
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className={styles.messageInputArea}>
+                  <div className={`${styles.inputGroup} ${canSend ? "" : styles.inputGroupDisabled}`}>
+                    <button type="button" className={styles.attachButton} title="Attach file" disabled={!canSend}>
+                      <HiOutlinePaperClip />
                     </button>
-                    <div
-                      className={`${styles.chatHeaderInfo} ${styles.flex} ${styles.flexCenter}`}
+                    <input
+                      type="text"
+                      className={styles.messageInput}
+                      placeholder={canSend ? "Type a message…" : "Select a conversation"}
+                      value={text}
+                      disabled={!canSend}
+                      onChange={(e) => setText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey && canSend && text.trim()) {
+                          e.preventDefault();
+                          sendChat();
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={sendChat}
+                      className={styles.sendButton}
+                      title="Send"
+                      disabled={!canSend || !text.trim() || sending}
                     >
-                      <div className={styles.avatarWrapper}>
-                        {/* {
-                                                        selectedConversation?.sender?.profileImage ? ( */}
-                        <img
-                          src={
-                            selectedConversation?.sender?.profileImage ||
-                            "https://imgs.search.brave.com/W_YLXhNT3XwZb2G3RPN5rqxKXEP-wceUf5ZHHgMt2mk/rs:fit:860:0:0:0/g:ce/aHR0cHM6Ly9zdGF0/aWMudmVjdGVlenku/Y29tL3N5c3RlbS9y/ZXNvdXJjZXMvdGh1/bWJuYWlscy8wNDgv/OTI2LzA4NC9zbWFs/bC9zaWx2ZXItbWVt/YmVyc2hpcC1pY29u/LWRlZmF1bHQtYXZh/dGFyLXByb2ZpbGUt/aWNvbi1tZW1iZXJz/aGlwLWljb24tc29j/aWFsLW1lZGlhLXVz/ZXItaW1hZ2UtaWxs/dXN0cmF0aW9uLXZl/Y3Rvci5qcGc"
-                          }
-                          // alt={selectedConversation.sender.fullname}
-                          className={styles.chatHeaderAvatar}
-                          style={{
-                            borderRadius: "50%",
-                            width: "40px",
-                            height: "40px",
-                            objectFit: "cover",
-                          }}
-                        />
-
-                        {selectedConversation?.sender.isActive && (
-                          <div className={styles.onlineIndicator}></div>
-                        )}
-                      </div>
-                      <div>
-                        <div className={styles.chatHeaderName}>
-                          {selectedConversation?.sender?.fullname || "User"}
-                        </div>
-                        {/* <div className={styles.chatHeaderStatus} style={{ color: selectedConversation?.sender.isActive ? '#10b981' : '#6c757d' }}>
-                                                        {selectedConversation?.isOnline ? 'Active now' : selectedConversation?.lastActive || 'Offline'}
-                                                    </div> */}
-                      </div>
-                    </div>
-                    {chatTimer.isRunning &&
-                      isActiveChatUser === selectChatUser && (
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            gap: "10px",
-                            mr: "10px",
-                          }}
-                        >
-                          <p>
-                            {" "}
-                            Timer: {minutes}:{remainingSeconds}
-                          </p>
-                          <div>
-                            <button onClick={stopChatTimer} className={styles.dangerBtn}>
-                              Stop Chat
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                  </div>
-
-                  {/* Messages Area */}
-                  <div className={styles.messagesArea} ref={messagesAreaRef}>
-                    {showChatEndPop ? (
-                      <div className={styles.mainChatReqBox}>
-                        <div className={styles.chatRequestBox}>
-                          <div className={styles.chatIcon}>🔒</div>
-
-                          <div className={styles.chatRequestContent}>
-                            <h4>Chat Ended</h4>
-                            <p>The chat session has been ended successfully</p>
-                          </div>
-
-                          <button
-                            onClick={() => setShowChatEndPop(false)}
-                            className={styles.acceptBtn}
-                          >
-                            OK
-                          </button>
-                        </div>
-                      </div>
-                    ) : chatAccepted?.isChatAccepted === "request" ? (
-                      <div className={styles.mainChatReqBox}>
-                        <div className={styles.chatRequestBox}>
-                          <div className={styles.chatIcon}>💬</div>
-
-                          <div className={styles.chatRequestContent}>
-                            <h4>New Chat Request</h4>
-                            <p>A user wants to start a chat with you</p>
-                          </div>
-
-                          <button
-                            onClick={() => acceptUserChat(chatAccepted)}
-                            className={styles.acceptBtn}
-                          >
-                            Accept Chat
-                          </button>
-                        </div>
-                      </div>
-                    ) : chatMessagesData.length === 0 ? (
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "center",
-                          alignItems: "center",
-                          height: "100%",
-                        }}
-                      >
-                        <p>No messages yet. Start the conversation!</p>
-                      </div>
-                    ) : (
-                      <>
-                        {chatMessagesData.map((message) => {
-                          const isOwn = message.senderId === consultantId;
-                          const timestamp = new Date(
-                            message.timestamp,
-                          ).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            hour12: true,
-                          });
-
-                          return (
-                            <div
-                              key={message._id}
-                              className={`${styles.messageContainer} ${isOwn ? styles.messageContainerRight : styles.messageContainerLeft}`}
-                            >
-                              <div
-                                className={`${styles.messageBubble} ${isOwn ? styles.messageBubbleOwn : styles.messageBubbleOther}`}
-                              >
-                                {/* {!isOwn && (
-                                                                <div className={styles.messageSender}>
-                                                                    User
-                                                                </div>
-                                                            )} */}
-                                <div className={styles.messageText}>
-                                  {message.text}
-                                </div>
-                                <div className={styles.messageTimestamp}>
-                                  {timestamp}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                        <div ref={messagesEndRef} />
-                      </>
-                    )}
-                  </div>
-
-                  {/* Message Input */}
-                  <div className={styles.messageInputArea}>
-                    <div className={styles.inputGroup}>
-                      <button
-                        className={styles.attachButton}
-                        title="Attach File"
-                      >
-                        <svg
-                          width="20"
-                          height="20"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2.5"
-                        >
-                          <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                        </svg>
-                      </button>
-                      <input
-                        onChange={(e) => setText(e.target.value)}
-                        value={text}
-                        type="text"
-                        className={styles.messageInput}
-                        placeholder="Type a message..."
-                        onKeyPress={(e) => {
-                          if (e.key === "Enter" && text.trim()) {
-                            sendChat();
-                          }
-                        }}
-                      />
-                      <button
-                        onClick={sendChat}
-                        className={styles.sendButton}
-                        title="Send"
-                      >
-                        <svg
-                          className={styles.sendIcon}
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2.5"
-                        >
-                          <line x1="22" y1="2" x2="11" y2="13" />
-                          <polygon points="22 2 15 22 11 13 2 9 22 2" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className={styles.emptyChatState}>
-                  <div className={styles.emptyChatContent}>
-                    <svg
-                      className={styles.emptyChatIcon}
-                      width="64"
-                      height="64"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                    >
-                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                    </svg>
-                    <p className={styles.emptyChatText}>
-                      Select a conversation to start chatting
-                    </p>
+                      <HiOutlinePaperAirplane className={styles.sendIcon} />
+                    </button>
                   </div>
                 </div>
-              )}
-            </div>
-          </div>
+              </>
+            ) : (
+              <div className={styles.emptyChatState}>
+                <div className={styles.emptyChatContent}>
+                  <HiOutlineChatBubbleLeftRight className={styles.emptyChatIcon} />
+                  <p className={styles.emptyTitle}>Select a conversation</p>
+                  <p className={styles.emptyText}>Choose a client from the list to view the conversation.</p>
+                </div>
+              </div>
+            )}
+          </section>
         </div>
       </div>
-      <ReactToast
-        show={showChatEndToast}
-        message="Chat ended"
-        onClose={() => setShowChatEndToast(false)}
-      />
+
+      <ReactToast show={showChatEndToast} message="Chat ended" onClose={() => setShowChatEndToast(false)} />
     </Fragment>
   );
 };

@@ -47,6 +47,12 @@ export function describeMediaError(err, callType) {
   if (code.includes("NOT_SUPPORTED") || /not support/i.test(msg)) {
     return { code: "not_supported", message: "Your browser does not support calling. Please use a recent version of Chrome, Edge, Safari or Firefox." };
   }
+  if (code.includes("CAN_NOT_GET_GATEWAY_SERVER") || /vendor key|appid|app id/i.test(msg)) {
+    return { code: "agora_rejected", message: "The call service rejected this session (App ID / token mismatch). Please try again; if it persists, contact support." };
+  }
+  if (code.includes("INVALID_PARAMS")) {
+    return { code: "agora_params", message: "The call could not be set up (invalid call parameters)." };
+  }
   if (code.includes("INVALID_TOKEN") || code.includes("TOKEN") || /token/i.test(msg)) {
     return { code: "token", message: "The call could not be authorised. Please try again." };
   }
@@ -98,7 +104,8 @@ export async function probeMedia(callType) {
           return { ok: true, warning: { code: "camera_unavailable", message: "No camera was found — continuing with audio only." } };
         } catch (e) { /* fall through to audio error */ }
       }
-      return { ok: false, code: "device_not_found", message: "No microphone was detected by the browser." + hint, canOpenInTab: embedded };
+      // No input device at all: join receive-only (matches the previous behaviour) and say so.
+      return { ok: true, noAudio: true, warning: { code: "no_microphone", message: "No microphone detected — you can hear the other participant, but they cannot hear you." + hint } };
     }
     if (name === "NotReadableError" || name === "AbortError") {
       return { ok: false, code: "device_busy", message: "Your microphone or camera is already in use by another application or tab. Close it and try again.", canOpenInTab: false };
@@ -217,12 +224,14 @@ export const joinCall = createAsyncThunk(
         return rejectWithValue(probe);
       }
       if (probe.warning) warning = probe.warning;
-      try {
-        localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
-      } catch (err) {
-        const d = describeMediaError(err, callType);
-        console.error("[CALL ERROR] microphone:", d.code);
-        return rejectWithValue({ ...d, canOpenInTab: inIframe() });
+      if (!probe.noAudio) {
+        try {
+          localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
+        } catch (err) {
+          const d = describeMediaError(err, callType);
+          console.error("[CALL ERROR] microphone:", d.code);
+          return rejectWithValue({ ...d, canOpenInTab: inIframe() });
+        }
       }
       if (callType === "video") {
         try {
@@ -237,16 +246,25 @@ export const joinCall = createAsyncThunk(
         }
       }
 
+      console.log("[AGORA DEBUG] join →", { appId: String(appId).slice(0, 6) + "…", channel, uid: numericUid, tokenLength: String(token).length, callType, tracks: { audio: Boolean(localAudioTrack), video: Boolean(localVideoTrack) } });
       await client.join(appId, channel, token, numericUid);
-      console.log("[CALL] joined channel", channel, "uid", client.uid);
-      await client.publish([localAudioTrack, localVideoTrack].filter(Boolean));
-      return { channel, callType, hasVideo: Boolean(localVideoTrack), warning };
+      console.log("[AGORA DEBUG] joined", { channel, uid: client.uid, state: client.connectionState });
+      const tracks = [localAudioTrack, localVideoTrack].filter(Boolean);
+      // Receive-only participants (no mic/camera) must not call publish([]) —
+      // the SDK rejects an empty list, which is what produced "Unable to connect".
+      if (tracks.length) {
+        await client.publish(tracks);
+        console.log("[AGORA DEBUG] published", tracks.map((t) => t.trackMediaType));
+      } else {
+        console.log("[AGORA DEBUG] receive-only: nothing to publish");
+      }
+      return { channel, callType, hasVideo: Boolean(localVideoTrack), hasAudio: Boolean(localAudioTrack), warning };
     } catch (err) {
       await releaseLocalTracks();
       try { if (client.connectionState !== "DISCONNECTED") await client.leave(); } catch (e) { /* ignore */ }
       const d = describeMediaError(err, callType);
-      console.error("[CALL ERROR] join failed:", err?.message);
-      return rejectWithValue(d);
+      console.error("[CALL ERROR] join failed:", err?.code || err?.name, err?.message);
+      return rejectWithValue({ ...d, canOpenInTab: inIframe(), details: `${err?.code || err?.name || "ERROR"}: ${err?.message || ""}`.slice(0, 300) });
     }
   },
 );
@@ -271,6 +289,7 @@ const initialState = {
   muted: false,
   videoEnabled: false,
   hasLocalVideo: false,
+  hasLocalAudio: false,
   remoteJoined: false,
   remoteAudioOn: false,
   remoteVideoOn: false,
@@ -291,6 +310,7 @@ const callSlice = createSlice({
     },
     setMediaError: (state, action) => { state.mediaError = action.payload; },
     toggleMute: (state) => {
+      if (!localAudioTrack) return;
       state.muted = !state.muted;
       localAudioTrack?.setEnabled(!state.muted);
     },
@@ -313,6 +333,7 @@ const callSlice = createSlice({
         state.channel = action.payload.channel;
         state.callType = action.payload.callType;
         state.hasLocalVideo = action.payload.hasVideo;
+        state.hasLocalAudio = action.payload.hasAudio;
         state.videoEnabled = action.payload.hasVideo;
         state.muted = false;
         state.mediaWarning = action.payload.warning || null;

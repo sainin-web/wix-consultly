@@ -106,7 +106,7 @@ function VideoCallingPage() {
           return;
         }
         setSession(s);
-        console.log("[CALL] page loaded", { callId, status: s.status, role: s.role });
+        console.log("[CALL SESSION] page loaded", { callId, status: s.status, role: s.role, channel: s.channelName, callType: s.callType, counterpart: s.participant?.id });
         if (s.status === "ringing") {
           setPhase("ringing");
           if (s.role === "user") { initRingtone(); playRingtone(); }
@@ -125,6 +125,7 @@ function VideoCallingPage() {
   const fetchToken = useCallback(async () => {
     const { data } = await axios.post(`${BACKEND}/api/call/token/${callId}`, { userId: me });
     if (!data?.success || !data.token) throw new Error(data?.message || "token");
+    console.log("[CALL TOKEN] received", { channel: data.channelName, uid: data.uid, expiresAt: new Date(data.expiresAt).toISOString(), tokenLength: String(data.token).length, appId: String(data.appId).slice(0, 6) + "…" });
     return data;
   }, [callId, me]);
 
@@ -139,20 +140,29 @@ function VideoCallingPage() {
       }));
       if (joinCall.rejected.match(r)) {
         joinedRef.current = false;
+        console.error("[CALL JOIN] failed", r.payload);
         setPhase("failed");
-        setNote({ text: r.payload?.message || "Unable to connect the call.", tone: "danger" });
+        setNote({ text: r.payload?.message || "Unable to connect the call.", tone: "danger", details: r.payload?.details || r.payload?.code });
         return;
       }
-      await axios.post(`${BACKEND}/api/call/joined/${callId}`, { userId: me });
-      console.log("[CALL] joined + reported to server", callId);
+      const joinedRes = await axios.post(`${BACKEND}/api/call/joined/${callId}`, { userId: me });
+      console.log("[CALL JOIN] reported to server", { callId, status: joinedRes.data?.session?.status, activated: Boolean(joinedRes.data?.activated) });
     } catch (err) {
       joinedRef.current = false;
       const code = err.response?.data?.code || "";
       if (code.startsWith("call_")) { finish("notfound", { note: { text: "This call is no longer active.", tone: "muted" } }); return; }
+      console.error("[CALL JOIN] setup failed", err.response?.data || err.message);
       setPhase("failed");
-      setNote({ text: "Unable to connect the call. Please check your internet connection and try again.", tone: "danger" });
+      setNote({ text: err.response?.data?.message || "Unable to reach the call service. Please check your internet connection and try again.", tone: "danger", details: `${err.response?.status || ""} ${err.response?.data?.code || err.message || ""}`.trim() });
     }
   }, [session, dispatch, fetchToken, callId, me, finish]);
+
+  // Connecting for too long: the server fails the call at CALL_CONNECT_TIMEOUT_MS; tell the user why.
+  useEffect(() => {
+    if (phase !== "connecting") return;
+    const t = setTimeout(() => setNote({ text: "Still connecting… the other participant has not joined yet. The call will be cancelled automatically if it cannot connect.", tone: "warn" }), 20000);
+    return () => clearTimeout(t);
+  }, [phase]);
 
   useEffect(() => {
     if ((phase === "connecting" || phase === "active") && !joinedRef.current) join();
@@ -290,7 +300,7 @@ function VideoCallingPage() {
 
         {/* Banners */}
         {note && !terminal && <div className={`${styles.banner} ${styles[`banner_${note.tone}`] || ""}`} role="status">{note.text}</div>}
-        {media.mediaWarning && phase === "active" && <div className={`${styles.banner} ${styles.banner_warn}`}>{media.mediaWarning.message}</div>}
+        {media.mediaWarning && (phase === "active" || phase === "connecting") && <div className={`${styles.banner} ${styles.banner_warn}`}>{media.mediaWarning.message}</div>}
         {credits != null && phase === "active" && (
           <div className={`${styles.banner} ${credits <= 10 ? styles.banner_danger : styles.banner_warn}`} role="alert">
             {credits > 0 ? `${credits} seconds of credits remaining` : "Credits exhausted — ending call"}
@@ -338,6 +348,7 @@ function VideoCallingPage() {
                     {phase === "ended" ? "Call ended" : phase === "rejected" ? "Call declined" : phase === "cancelled" ? "Call cancelled" : phase === "missed" ? "No answer" : phase === "failed" ? "Call failed" : "Call unavailable"}
                   </div>
                   {note?.text && phase !== "ended" && <div className={styles.summaryText}>{note.text}</div>}
+                  {note?.details && phase === "failed" && <div className={styles.summaryText} style={{ marginTop: 6, fontSize: 11.5, fontFamily: "monospace", opacity: 0.8 }}>Technical details: {note.details}</div>}
                   {phase === "ended" && summary && (
                     <dl className={styles.summaryGrid}>
                       <div><dt>Type</dt><dd>{isVideo ? "Video consultation" : "Audio consultation"}</dd></div>
@@ -368,7 +379,7 @@ function VideoCallingPage() {
               <button type="button" className={styles.endBtn} onClick={cancelNow} disabled={ending}>{I.end}<span>{ending ? "Cancelling…" : "Cancel"}</span></button>
             ) : (
               <>
-                <button type="button" className={`${styles.ctl} ${media.muted ? styles.ctlOff : ""}`} onClick={() => dispatch(toggleMute())} disabled={media.phase !== "joined"} aria-pressed={media.muted} title={media.muted ? "Unmute" : "Mute"}>
+                <button type="button" className={`${styles.ctl} ${media.muted ? styles.ctlOff : ""}`} onClick={() => dispatch(toggleMute())} disabled={media.phase !== "joined" || !media.hasLocalAudio} aria-pressed={media.muted} title={media.muted ? "Unmute" : "Mute"}>
                   {media.muted ? I.micOff : I.mic}<span>{media.muted ? "Unmute" : "Mute"}</span>
                 </button>
                 {isVideo && (

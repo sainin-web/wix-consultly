@@ -29,6 +29,8 @@ const { formatTime } = require("../Helper/helper");
 const GRACE_MS = Number(process.env.CALL_GRACE_MS) || 20000;
 const RING_TIMEOUT_MS = Number(process.env.CALL_RING_TIMEOUT_MS) || 30000;
 const TOKEN_TTL_SEC = Number(process.env.AGORA_TOKEN_TTL_SEC) || 7200;
+const CONNECT_TIMEOUT_MS = Number(process.env.CALL_CONNECT_TIMEOUT_MS) || 45000;
+const connectTimers = new Map(); // callId → timer
 const WARN_AT_SEC = [30, 10];
 
 let ioRef = null;
@@ -160,7 +162,7 @@ async function requestCall({ callerId, receiverId, callType = "voice", shopId, c
     consultantConnected: isOnline(receiverId),
   });
   const callId = String(s._id);
-  console.log("[CALL] Session created", { callId, callType: type, userId: String(callerId), consultantId: String(receiverId) });
+  console.log("[CALL REQUEST] session created", { callId, callType: type, userId: String(callerId), consultantId: String(receiverId), channel, rate, balance });
 
   const parties = await withParties(s);
   const incoming = {
@@ -259,7 +261,8 @@ async function acceptCall({ callId, by }) {
     return { ok: false, code: existing ? `call_${existing.status}` : "not_found", session: existing ? snapshot(existing) : null };
   }
   cancelRing(callId);
-  console.log("[CALL] Call accepted", { callId: String(callId), consultantId: String(by) });
+  console.log("[CALL ACCEPT] accepted", { callId: String(callId), consultantId: String(by), channel: s.sessionId, callType: s.callType });
+  scheduleConnectTimeout(callId);
   const parties = await withParties(s);
   const payload = { ...snapshot(s), counterpart: parties.caller };
   emitTo(s.callerId, "callAccepted", payload);
@@ -278,7 +281,7 @@ async function markJoined({ callId, userId }) {
   if (!["accepted", "connecting"].includes(s.status)) return { ok: false, code: `call_${s.status}`, session: snapshot(s) };
 
   await CallSession.updateOne({ _id: callId }, { $set: { [`${role}Joined`]: true, status: "connecting", [`${role}Connected`]: true } });
-  console.log(`[CALL] ${role} joined Agora`, { callId: String(callId) });
+  console.log(`[CALL JOIN] ${role} joined Agora`, { callId: String(callId), status: s.status });
   const fresh = await CallSession.findById(callId);
   if (fresh.userJoined && fresh.consultantJoined) return activateCall(callId);
   return { ok: true, session: snapshot(fresh) };
@@ -307,7 +310,8 @@ async function activateCall(callId) {
   });
   await CallSession.updateOne({ _id: callId }, { $set: { transtionId: String(tx._id) } });
   s.transtionId = String(tx._id);
-  console.log("[CALL] Agora connected on both sides → ACTIVE, billing started", { callId: String(callId), transactionId: String(tx._id), startedAt: now.toISOString() });
+  cancelConnectTimeout(callId);
+  console.log("[BILLING DEBUG] both joined → ACTIVE, billing starts", { callId: String(callId), transactionId: String(tx._id), startedAt: now.toISOString(), channel: s.sessionId });
   const payload = snapshot(s);
   emitTo(s.callerId, "callConnected", payload);
   emitTo(s.receiverId, "callConnected", payload);
@@ -346,10 +350,11 @@ async function endCallSession({ callId, endedBy = "system", endReason = "ended" 
   cancelRing(cid);
   cancelGrace(cid);
   cancelWatchdog(cid);
+  cancelConnectTimeout(cid);
   const userId = idOf(locked.callerId);
   const consultantId = idOf(locked.receiverId);
   const shopId = String(locked.shopId);
-  console.log("[CALL] Ending session", { callId: cid, userId, consultantId, endedBy, endReason, wasActive: Boolean(locked.connectedAt) });
+  console.log("[CALL END] ending session", { callId: cid, userId, consultantId, endedBy, endReason, wasActive: Boolean(locked.connectedAt) });
 
   // Never reached active → nothing to bill.
   if (!locked.connectedAt) {
@@ -479,7 +484,7 @@ async function markDisconnected(userId) {
   if (!BILLABLE_LOCK.includes(s.status)) return null;
   await CallSession.updateOne({ _id: cid }, { $set: { [`${role}Connected`]: false, [`${role}DisconnectedAt`]: new Date() } });
   const other = role === "user" ? idOf(s.receiverId) : idOf(s.callerId);
-  console.log(`[CALL] ${role === "user" ? "User" : "Consultant"} disconnected`, { callId: cid });
+  console.log(`[CALL DISCONNECT] ${role === "user" ? "User" : "Consultant"} disconnected`, { callId: cid, status: s.status });
   console.log("[CALL] Grace timer started", { callId: cid, role, graceMs: GRACE_MS });
   emitTo(other, "participantDisconnected", { kind: "call", chatId: cid, callId: cid, role, graceMs: GRACE_MS, at: new Date().toISOString() });
   scheduleGrace(cid, role, GRACE_MS);
@@ -582,14 +587,33 @@ async function issueToken({ callId, userId }) {
   const uid = agoraUidFor(userId, s.sessionId);
   const expiresAt = Math.floor(Date.now() / 1000) + TOKEN_TTL_SEC;
   const token = RtcTokenBuilder.buildTokenWithUid(appId, cert, s.sessionId, uid, RtcRole.PUBLISHER, expiresAt);
+  console.log("[CALL TOKEN] issued", { callId: String(callId), userId: String(userId), role: roleFor(s, userId), channel: s.sessionId, uid, expiresAt: new Date(expiresAt * 1000).toISOString(), status: s.status });
   return { ok: true, token, appId, channelName: s.sessionId, uid, expiresAt: expiresAt * 1000 };
+}
+
+/* ── 7b. connect timeout: nothing stays in accepted/connecting forever ── */
+
+function scheduleConnectTimeout(callId, ms = CONNECT_TIMEOUT_MS) {
+  cancelConnectTimeout(callId);
+  connectTimers.set(String(callId), setTimeout(() => onConnectTimeout(callId), ms));
+}
+function cancelConnectTimeout(callId) {
+  const t = connectTimers.get(String(callId));
+  if (t) { clearTimeout(t); connectTimers.delete(String(callId)); }
+}
+async function onConnectTimeout(callId) {
+  connectTimers.delete(String(callId));
+  const s = await CallSession.findById(callId);
+  if (!s || !["accepted", "connecting"].includes(s.status)) return;
+  console.warn("[CALL JOIN] connect timeout — participants never both joined", { callId: String(callId), userJoined: s.userJoined, consultantJoined: s.consultantJoined });
+  await failCall({ callId, by: "system", reason: "connect_timeout", force: true });
 }
 
 /* ── 8. failure + recovery ─────────────────────────────────── */
 
-async function failCall({ callId, by, reason = "media_failure" }) {
+async function failCall({ callId, by, reason = "media_failure", force = false }) {
   const s = await CallSession.findById(callId);
-  if (!s || !roleFor(s, by)) return { ok: false };
+  if (!s || (!force && !roleFor(s, by))) return { ok: false };
   if (s.status === "active") return endAndBroadcast({ callId, endedBy: by, endReason: reason });
   const r = await CallSession.findOneAndUpdate(
     { _id: callId, status: { $in: ["ringing", "accepted", "connecting"] } },
@@ -597,8 +621,8 @@ async function failCall({ callId, by, reason = "media_failure" }) {
     { new: true },
   );
   if (!r) return { ok: false };
-  cancelRing(callId); cancelGrace(callId);
-  console.log("[CALL] Failed before active — no charge", { callId: String(callId), reason });
+  cancelRing(callId); cancelGrace(callId); cancelConnectTimeout(callId);
+  console.log("[CALL] Failed before active — no charge", { callId: String(callId), reason, by: String(by) });
   const p = { callId: String(callId), reason };
   emitTo(r.callerId, "callFailed", p);
   emitTo(r.receiverId, "callFailed", p);
@@ -623,6 +647,12 @@ async function recoverCallSessions() {
       await endAndBroadcast({ callId: cid, endedBy: s.endedBy || "system", endReason: s.endReason || "ended" });
       continue;
     }
+    if (["accepted", "connecting"].includes(s.status)) {
+      const since = now - new Date(s.acceptedAt || s.updatedAt || s.createdAt).getTime();
+      if (since >= CONNECT_TIMEOUT_MS) await onConnectTimeout(cid);
+      else scheduleConnectTimeout(cid, CONNECT_TIMEOUT_MS - since);
+      continue;
+    }
     let ended = false;
     for (const role of ["user", "consultant"]) {
       const at = s[`${role}DisconnectedAt`];
@@ -642,6 +672,7 @@ async function recoverCallSessions() {
 module.exports = {
   GRACE_MS,
   RING_TIMEOUT_MS,
+  CONNECT_TIMEOUT_MS,
   setIo,
   emitTo,
   snapshot,

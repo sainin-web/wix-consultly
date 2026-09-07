@@ -1,6 +1,10 @@
-
 import { createSlice } from "@reduxjs/toolkit";
 
+/**
+ * localStorage is a convenience hint only — the server's active-session
+ * endpoint / `chatResumed` event overwrite it on load. It never decides
+ * whether billing happens.
+ */
 const getPersistedChatTimer = () => {
     if (typeof window === "undefined") return null;
     try {
@@ -21,7 +25,14 @@ const getPersistedChatTimer = () => {
     }
 };
 
-const persistedChatTimer = getPersistedChatTimer();
+const emptyTimer = () => ({
+    transactionId: null,
+    startTime: null,
+    isRunning: false,
+    userId: null,
+    shopId: null,
+    consultantId: null,
+});
 
 const socketSlice = createSlice({
     name: "socket",
@@ -31,21 +42,19 @@ const socketSlice = createSlice({
         messages: [],
         insufficientBalance: null,
         isChatAccepted: null,
-        chatTimer: persistedChatTimer || {
-            transactionId: null,
-            startTime: null,
-            isRunning: false,
-            userId: null,
-            shopId: null,
-            consultantId: null,
-        },
+        chatTimer: getPersistedChatTimer() || emptyTimer(),
         autoChatEnded: null,
         incomingCall: null,
         callAccepted: null,
         callEnded: null,
         callRejected: null,
         confirmChat: null,
-        
+        /** Final result of the last ended chat: { chatId, endedBy, endReason, durationSeconds, finalAmount, … } */
+        chatEndSummary: null,
+        /** Other participant's link state: { chatId, role, connected, graceMs, since } */
+        peerConnection: null,
+        /** Last server rejection of a message: { reason, message, at } */
+        messageRejected: null,
     },
     reducers: {
         setConnected: (state, action) => {
@@ -55,7 +64,6 @@ const socketSlice = createSlice({
             state.activeUsers = action.payload;
         },
         addMessage: (state, action) => {
-            console.log("addMessage", action.payload);
             state.messages.push(action.payload);
         },
         markMessagesSeen: (state, action) => {
@@ -73,14 +81,15 @@ const socketSlice = createSlice({
         setChatTimerStarted: (state, action) => {
             const p = action.payload || {};
             Object.assign(state.chatTimer, {
-                transactionId: p.transactionId,
-                startTime: p.startTime,
+                transactionId: p.transactionId || p.chatId,
+                startTime: p.startTime || p.startedAt,
                 isRunning: true,
                 userId: p.userId || state.chatTimer.userId || null,
                 shopId: p.shopId || state.chatTimer.shopId || null,
-                consultantId:
-                    p.consultantId || state.chatTimer.consultantId || null,
+                consultantId: p.consultantId || state.chatTimer.consultantId || null,
             });
+            state.chatEndSummary = null;
+            state.peerConnection = null;
             try {
                 localStorage.setItem("chatTimer", JSON.stringify(state.chatTimer));
             } catch (error) {
@@ -88,30 +97,43 @@ const socketSlice = createSlice({
             }
         },
         setChatTimerStopped: (state) => {
-            state.chatTimer = {
-                transactionId: null,
-                startTime: null,
-                isRunning: false,
-                userId: null,
-                shopId: null,
-                consultantId: null,
-            };
+            state.chatTimer = emptyTimer();
+            state.peerConnection = null;
             try {
                 localStorage.removeItem("chatTimer");
             } catch (error) {
                 // ignore storage errors
             }
         },
+        /** Server said the session is over — keep the summary for the UI. */
+        setChatEnded: (state, action) => {
+            const p = action.payload || null;
+            state.chatEndSummary = p;
+            state.chatTimer = emptyTimer();
+            state.peerConnection = null;
+            try {
+                localStorage.removeItem("chatTimer");
+            } catch (error) {
+                // ignore storage errors
+            }
+        },
+        clearChatEndSummary: (state) => {
+            state.chatEndSummary = null;
+        },
+        setPeerConnection: (state, action) => {
+            state.peerConnection = action.payload;
+        },
+        setMessageRejected: (state, action) => {
+            state.messageRejected = action.payload ? { ...action.payload, at: Date.now() } : null;
+        },
         setAutoChatEnded: (state, action) => {
             state.autoChatEnded = action.payload;
         },
         setIncomingCall: (state, action) => {
             state.incomingCall = action.payload;
-            console.log("setIncomingCall", state.incomingCall);
         },
         setCallAccepted: (state, action) => {
             state.callAccepted = action.payload;
-            console.log("setCallAccepted", state.callAccepted);
             localStorage.setItem("callAccepted", JSON.stringify(state.callAccepted));
         },
         setCallEnded: (state, action) => {
@@ -128,14 +150,9 @@ const socketSlice = createSlice({
         },
         setConfirmChat: (state, action) => {
             state.confirmChat = action.payload;
-            console.log("setConfirmChat", state.confirmChat);
         },
-        // connectSocket is a no-op reducer for compatibility
-        // Socket connection is handled in sokectProvider.js
-        connectSocket: (state, action) => {
-            // No state change needed - connection is handled in provider
-            // This action exists for backward compatibility
-        },
+        // No-op kept for backward compatibility; connection lives in sokectProvider.js
+        connectSocket: () => {},
     },
 });
 
@@ -148,6 +165,10 @@ export const {
     setChatAccepted,
     setChatTimerStarted,
     setChatTimerStopped,
+    setChatEnded,
+    clearChatEndSummary,
+    setPeerConnection,
+    setMessageRejected,
     setAutoChatEnded,
     setIncomingCall,
     setCallAccepted,

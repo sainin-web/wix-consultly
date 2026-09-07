@@ -514,3 +514,90 @@
   }
   .chatHeaderName { max-width: 150px; }
 }
+
+
+/* ── Session lifecycle UI (added with server-authoritative sessions) ── */
+
+.peerBanner {
+  flex-shrink: 0;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--sf-warn-ink);
+  background: var(--sf-warn-bg);
+  border-bottom: 1px solid var(--sf-line);
+}
+
+.peerBannerOk {
+  color: var(--sf-success-ink);
+  background: var(--sf-success-bg);
+}
+
+.endSummary {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  color: var(--sf-muted);
+  background: var(--sf-surface);
+  border-top: 1px solid var(--sf-line);
+}
+
+.endSummary strong { color: var(--sf-ink); font-size: 13px; }
+
+.rejectNote {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--sf-danger-ink);
+  background: var(--sf-danger-bg);
+  border-top: 1px solid var(--sf-line);
+}
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(17, 24, 39, 0.45);
+}
+
+.modalCard {
+  width: 100%;
+  max-width: 420px;
+  padding: 20px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 16px 40px -8px rgba(16, 24, 40, 0.25);
+  font-family: inherit;
+}
+
+.modalTitle { margin: 0 0 6px; font-size: 17px; font-weight: 650; color: var(--sf-ink); }
+.modalText { margin: 0 0 16px; font-size: 13.5px; line-height: 1.55; color: var(--sf-muted); }
+
+.modalActions { display: flex; justify-content: flex-end; gap: 8px; }
+
+.modalGhost,
+.modalPrimary,
+.modalDanger {
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.modalGhost { border: 1px solid var(--sf-line); background: #fff; color: var(--sf-ink); }
+.modalPrimary { border: 0; background: var(--sf-accent); color: #fff; }
+.modalDanger { border: 0; background: var(--sf-danger-ink); color: #fff; }
+.modalGhost:disabled, .modalPrimary:disabled, .modalDanger:disabled { opacity: 0.55; cursor: not-allowed; }

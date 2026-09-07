@@ -25,6 +25,7 @@ const {
   removeSocketFromRegistry,
 } = require("./MiddleWare/socketRegistry");
 const { shopModel } = require("./Modal/shopify");
+const chatSession = require("./services/chatSession");
 
 const ioServer = (server) => {
   const io = new Server(server, {
@@ -34,6 +35,8 @@ const ioServer = (server) => {
   const onlineUsers = new Map();
   let activeCalls = new Map();
   const pendingIncomingByUser = new Map();
+  chatSession.setIo(io, onlineUsers);
+  chatSession.recoverChatSessions().catch((e) => console.error("[CHAT ERROR] recovery:", e.message));
   io.on("connection", (socket) => {
     console.log("[socket] connected:", socket.id);
 
@@ -52,6 +55,12 @@ const ioServer = (server) => {
 
       if (ok) {
         broadcastOnlineUsers(io, onlineUsers);
+        try {
+          const active = await chatSession.markConnected(uid);
+          if (active) socket.emit("chatResumed", active);
+        } catch (e) {
+          console.error("[CHAT ERROR] markConnected:", e.message);
+        }
         const replayed = await replayPending(
           io,
           onlineUsers,
@@ -841,6 +850,22 @@ const ioServer = (server) => {
             return;
           }
 
+          const activeTx = await TransactionHistroy.findOne({
+            type: "chat",
+            senderId,
+            receiverId,
+            status: { $in: ["active", "ending"] },
+          }).select("status");
+          if (activeTx?.status === "ending") {
+            console.warn("[CHAT] message rejected: session is finalizing", { userId: String(senderId) });
+            socket.emit("messageRejected", { reason: "session_ending", message: "This chat session has ended." });
+            return;
+          }
+          if (!activeTx && ["request", "unlock"].includes(sender.isChatAccepted)) {
+            console.warn("[CHAT] message rejected: chat pending acceptance", { userId: String(senderId) });
+            socket.emit("messageRejected", { reason: "chat_pending", message: "Wait for the consultant to accept the chat." });
+            return;
+          }
           if (
             sender.isChatAccepted !== "accepted" &&
             sender.isChatAccepted !== "request"
@@ -849,6 +874,16 @@ const ioServer = (server) => {
               { _id: senderId },
               { $set: { isChatAccepted: "request" } }
             );
+          }
+        }
+
+        if (sender.userType === "consultant") {
+          const endingTx = await TransactionHistroy.findOne({
+            type: "chat", senderId: receiverId, receiverId: senderId, status: "ending",
+          }).select("_id");
+          if (endingTx) {
+            socket.emit("messageRejected", { reason: "session_ending", message: "This chat session has ended." });
+            return;
           }
         }
 
@@ -993,7 +1028,10 @@ const ioServer = (server) => {
         startTime: new Date(),
         status: "active",
         type: "chat",
+        userConnected: true,
+        consultantConnected: true,
       });
+      console.log("[CHAT] Session started", { chatId: String(transaction._id), userId: String(userId), consultantId: String(consultantId) });
 
       io.to(userId).emit("chatTimerStarted", {
         transactionId: transaction._id,
@@ -1010,53 +1048,13 @@ const ioServer = (server) => {
         consultantId,
         shopId,
       });
-      let userBalance = Number(user?.walletBalance);
-      const consultantCost = await User.findById(consultantId);
-      const consultantChatCost = Number(consultantCost?.chatPerMinute);
-      const perSecondCost = consultantChatCost / 60;
-      if (userBalance < perSecondCost) {
-        console.log("Insufficient balance to start chat");
-        return;
-      }
-
-      const maxChatSeconds = Math.floor(userBalance / perSecondCost);
-      const minutes = Math.floor(maxChatSeconds / 60);
-      const seconds = maxChatSeconds % 60;
-
-      console.log(
-        `User can chat for ${minutes} minutes and ${seconds} seconds`,
-      );
-      let remainingBalance = userBalance;
-      let chatSeconds = 0;
-
-      const interval = setInterval(() => {
-        if (remainingBalance >= perSecondCost) {
-          remainingBalance -= perSecondCost;
-          chatSeconds++;
-        } else {
-          clearInterval(interval);
-          console.log("🔥 BACKEND: autoChatEnded EMIT", {
-            transactionId: transaction._id,
-            userId,
-            consultantId,
-          });
-
-          io.to(userId).emit("autoChatEnded", {
-            transactionId: transaction._id,
-            reason: "auto-ended",
-          });
-
-          io.to(consultantId).emit("autoChatEnded", {
-            transactionId: transaction._id,
-            reason: "auto-ended",
-          });
-        }
-      }, 1000);
+      // Credit exhaustion is enforced by the server-side watchdog (restart-safe).
+      await chatSession.armBalanceWatchdog(transaction._id);
     });
 
     socket.on("conFirmChatEmit", async (acceptDataIds) => {
       const { userId, shopId, consultantId } = acceptDataIds;
-      console.log("conFirmChatEmit_______________________✅", acceptDataIds);
+      console.log("[CHAT] Consultant accepted (conFirmChatEmit)", { userId: String(userId), consultantId: String(consultantId) });
 
       if (!userId || !shopId || !consultantId) return;
 
@@ -1084,161 +1082,28 @@ const ioServer = (server) => {
     //----------------------------------------------- chat end --------------------------------------------------------------//
 
     socket.on("endChat", async (data) => {
-      const { transactionId, userId, consultantId, shopId } = data;
-      const uid = userId ? String(userId) : "";
-      const cid = consultantId ? String(consultantId) : "";
-
-      if (
-        !socket.data.userId ||
-        (uid && String(socket.data.userId) !== uid)
-      ) {
-        if (uid) {
-          const autoReg = await registerSocketUser(socket, uid, onlineUsers);
-          if (!autoReg) {
-            console.warn("endChat rejected:", {
-              boundUserId: socket.data.userId,
-              userId: uid,
-              consultantId: cid,
-              reason: "register failed",
-            });
-            return;
-          }
-        }
-      }
-
-      if (
-        !requireRegisteredSocket(socket) ||
-        !assertPartyToEvent(socket, { userId: uid, consultantId: cid }, [
-          "userId",
-          "consultantId",
-        ])
-      ) {
-        console.warn("endChat rejected:", {
-          boundUserId: socket.data.userId,
-          userId: uid,
-          consultantId: cid,
-        });
+      const { transactionId, userId, consultantId } = data || {};
+      const bound = socket.data.userId ? String(socket.data.userId) : "";
+      // The socket must already be registered as one of the two participants.
+      // (The old handler re-registered the consultant's socket AS the user,
+      // which kicked the user's real socket and swallowed the chatEnded event.)
+      if (!bound || ![String(userId || ""), String(consultantId || "")].includes(bound)) {
+        console.warn("[CHAT ERROR] endChat rejected: socket not a participant", { bound, userId, consultantId });
+        socket.emit("chatEndFailed", { transactionId, reason: "not_a_participant" });
         return;
       }
-      console.log("endChat______✅", data);
-      const session = await mongoose.startSession();
-      session.startTransaction();
-      try {
-        const transaction =
-          await TransactionHistroy.findById(transactionId).session(session);
-        if (!transaction) throw new Error("Transaction not found");
-        if (transaction.status === "completed") {
-          console.log(
-            "Chat already completed — syncing timer stop to both clients",
-            transactionId,
-          );
-          await session.abortTransaction();
-          const syncPayload = {
-            transactionId,
-            totalSeconds: transaction.totalSeconds ?? 0,
-            totalAmount: transaction.totalAmount ?? 0,
-            reason: "already_completed",
-          };
-          await emitToUser(io, onlineUsers, uid, "chatEnded", syncPayload);
-          await emitToUser(io, onlineUsers, cid, "chatEnded", syncPayload);
-          return;
-        }
-
-        const consultantCost =
-          await User.findById(consultantId).session(session);
-        if (!consultantCost) throw new Error("Consultant not found");
-
-        const shop = await shopModel.findById(shopId).session(session);
-        console.log("shop_____________", shop);
-        if (!shop) throw new Error("Shop not found");
-        const user_ = await User.findById(userId).session(session);
-        if (!user_) throw new Error("User not found");
-        const endTime = new Date();
-        const totalSeconds = Math.floor(
-          (endTime - new Date(transaction.startTime)) / 1000,
-        );
-        const perSecondCost = consultantCost.chatPerMinute / 60;
-        const totalAmount = Number((totalSeconds * perSecondCost).toFixed(2));
-        const adminCommission =
-          (totalAmount * Number(shop.adminPersenTage)) / 100;
-        const consultantShare = totalAmount - adminCommission;
-        const shopShare = adminCommission;
-        transaction.endTime = endTime;
-        transaction.totalSeconds = totalSeconds;
-        transaction.totalAmount = totalAmount;
-        transaction.status = "completed";
-        await transaction.save({ session });
-        await User.findByIdAndUpdate(
-          userId,
-          { $inc: { walletBalance: -totalAmount } },
-          { session },
-        );
-        await User.findByIdAndUpdate(
-          consultantId,
-          { $inc: { walletBalance: consultantShare } },
-          { session },
-        );
-        await shopModel.findByIdAndUpdate(
-          shopId,
-          { $inc: { adminWalletBalance: shopShare } },
-          { session },
-        );
-
-        await TransactionHistroy.findByIdAndUpdate(
-          transactionId,
-          {
-            $inc: {
-              adminAmount: adminCommission,
-              consultantAmount: consultantShare,
-              amount: totalAmount,
-            },
-          },
-          { session },
-        );
-
-        await User.findByIdAndUpdate(
-          userId,
-          { $set: { isChatAccepted: "chatEnd", chatLock: true } },
-          { session },
-        );
-        await WalletHistory.create({
-          userId: userId,
-          shop_id: shopId,
-          amount: totalAmount,
-          transactionType: "usage",
-          referenceType: "chat",
-          direction: "debit",
-          description: `Chat ended for ${formatTime(totalSeconds)} minutes`,
-          status: "success",
-        });
-        await WalletHistory.create({
-          userId: consultantId,
-          shop_id: shopId,
-          amount: consultantShare,
-          transactionType: "usage",
-          referenceType: "chat",
-          direction: "credit",
-          description: `Chat ended for ${formatTime(totalSeconds)} minutes`,
-          status: "success",
-        });
-
-        await session.commitTransaction();
-
-        const endedPayload = {
-          transactionId,
-          totalSeconds,
-          totalAmount,
-          reason: "ended",
-        };
-        await emitToUser(io, onlineUsers, uid, "chatEnded", endedPayload);
-        await emitToUser(io, onlineUsers, cid, "chatEnded", endedPayload);
-
-        console.log("✅ Chat ended:", transactionId);
-      } catch (error) {
-        console.log("Transaction error:", error);
-        await session.abortTransaction();
-      } finally {
-        session.endSession();
+      console.log("[CHAT] endChat requested", { chatId: String(transactionId), by: bound });
+      const result = await chatSession.endAndBroadcast({
+        transactionId,
+        endedBy: bound,
+        endReason: "ended",
+      });
+      if (!result.ok) {
+        console.warn("[CHAT ERROR] endChat failed", { chatId: String(transactionId), error: result.error });
+        socket.emit("chatEndFailed", { transactionId, reason: result.error });
+      } else if (result.alreadyEnded) {
+        // Idempotent: re-sync just this caller with the finalized result.
+        chatSession.broadcastEnded(result.session);
       }
     });
 
@@ -1251,6 +1116,12 @@ const ioServer = (server) => {
           await User.findByIdAndUpdate(uid, { isActive: false });
         } catch (err) {
           console.error("[socket] isActive update error:", err.message);
+        }
+        try {
+          // Only if this was the user's LAST socket (a reconnect replaces the map entry first).
+          if (!onlineUsers.has(uid)) await chatSession.markDisconnected(uid);
+        } catch (err) {
+          console.error("[CHAT ERROR] markDisconnected:", err.message);
         }
         broadcastOnlineUsers(io, onlineUsers);
         console.log("[socket] remaining online:", [...onlineUsers.keys()]);

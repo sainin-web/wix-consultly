@@ -662,3 +662,90 @@
   .chatRequestBox { flex-direction: column; text-align: center; gap: 8px; }
   .acceptBtn { width: 100%; }
 }
+
+
+/* ── Session lifecycle UI (added with server-authoritative sessions) ── */
+
+.peerBanner {
+  flex-shrink: 0;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--cds-warning, #b54708);
+  background: var(--cds-warning-soft, #fffaeb);
+  border-bottom: 1px solid var(--cds-border, #e6e8ec);
+}
+
+.peerBannerOk {
+  color: var(--cds-success, #067647);
+  background: var(--cds-success-soft, #ecfdf3);
+}
+
+.endSummary {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  color: var(--cds-text-muted, #666b78);
+  background: var(--cds-surface, #fff);
+  border-top: 1px solid var(--cds-border, #e6e8ec);
+}
+
+.endSummary strong { color: var(--cds-text, #111318); font-size: 13px; }
+
+.rejectNote {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--cds-danger, #b42318);
+  background: var(--cds-danger-soft, #fef3f2);
+  border-top: 1px solid var(--cds-border, #e6e8ec);
+}
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(17, 24, 39, 0.45);
+}
+
+.modalCard {
+  width: 100%;
+  max-width: 420px;
+  padding: 20px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 16px 40px -8px rgba(16, 24, 40, 0.25);
+  font-family: inherit;
+}
+
+.modalTitle { margin: 0 0 6px; font-size: 17px; font-weight: 650; color: var(--cds-text, #111318); }
+.modalText { margin: 0 0 16px; font-size: 13.5px; line-height: 1.55; color: var(--cds-text-muted, #666b78); }
+
+.modalActions { display: flex; justify-content: flex-end; gap: 8px; }
+
+.modalGhost,
+.modalPrimary,
+.modalDanger {
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.modalGhost { border: 1px solid var(--cds-border, #e6e8ec); background: #fff; color: var(--cds-text, #111318); }
+.modalPrimary { border: 0; background: var(--cds-accent, #16181d); color: #fff; }
+.modalDanger { border: 0; background: var(--cds-danger, #b42318); color: #fff; }
+.modalGhost:disabled, .modalPrimary:disabled, .modalDanger:disabled { opacity: 0.55; cursor: not-allowed; }

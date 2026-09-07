@@ -6,7 +6,9 @@ import { socket, ensureSocketRegistered, SOCKET_ROLE } from "../Sokect-io/Sokect
 import { getConsultantId, getShopId, clearConsultantSession } from "../../utils/wixStorage";
 import { fetchChatHistory, updateUserRequestById } from "../Redux/slices/ConsultantSlices";
 import { useDispatch, useSelector } from "react-redux";
-import { addMessage, setChatTimerStopped } from "../Redux/slices/sokectSlice";
+import { addMessage, setChatTimerStopped, setChatTimerStarted, clearChatEndSummary, setMessageRejected } from "../Redux/slices/sokectSlice";
+import { formatCurrency } from "../Helper/Helper";
+import PortalModal from "../middle-ware/PortalModal";
 import { BsThreeDotsVertical } from "react-icons/bs";
 import {
   HiOutlineChatBubbleLeftRight,
@@ -72,7 +74,14 @@ const ChatsPage = () => {
   const dispatch = useDispatch();
   const { chatHistory, userInRequest } = useSelector((state) => state.consultants);
   const messages = useSelector((state) => state.socket.messages);
-  const { chatTimer } = useSelector((state) => state.socket);
+  const { chatTimer, chatEndSummary, peerConnection, messageRejected } = useSelector((state) => state.socket);
+  const { voucherData } = useSelector((state) => state.users);
+  const currency = voucherData?.shopCurrency || "";
+  const [pendingResume, setPendingResume] = useState(null); // { userId, shopId } from the server
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
+  const [ending, setEnding] = useState(false);
+  const [rejectNote, setRejectNote] = useState("");
+  const [peerNote, setPeerNote] = useState(null);
   const [chatAccepted, setChatAccepted] = useState(null);
   const lastProcessedMessageId = useRef(null);
   const lastUnreadMessageId = useRef(null);
@@ -108,6 +117,78 @@ const ChatsPage = () => {
   useEffect(() => {
     if (chatTimer.isRunning) localStorage.setItem("activeChatUserId", chatTimer.userId);
   }, [chatTimer.isRunning, chatTimer.userId]);
+
+  useEffect(() => {
+    if (!consultantId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await axios.get(`${BACKEND}/api/chat/active-session/${consultantId}`);
+        if (cancelled) return;
+        if (!data?.active || !data.session) {
+          if (chatTimer.isRunning) dispatch(setChatTimerStopped());
+          localStorage.removeItem("activeChatUserId");
+          return;
+        }
+        const sess = data.session;
+        dbg("Active session restored from server", sess.chatId);
+        dispatch(
+          setChatTimerStarted({
+            transactionId: sess.chatId,
+            startTime: sess.startedAt,
+            userId: sess.userId,
+            shopId: sess.shopId,
+            consultantId: sess.consultantId,
+          }),
+        );
+        localStorage.setItem("activeChatUserId", sess.userId);
+        setPendingResume({ userId: sess.userId, shopId: sess.shopId });
+      } catch (err) {
+        console.warn("[CHAT ERROR] active-session check failed:", err.message);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [consultantId]);
+
+  // Once the chat list is in, open the conversation the server says is active.
+  useEffect(() => {
+    if (!pendingResume || !chatList.length) return;
+    const conv = chatList.find((c) => String(c.sender?.id) === String(pendingResume.userId));
+    if (conv) {
+      handleChatSelect({ shopId: conv.shop.id, userId: conv.sender.id, isChatAccepted: conv.isChatAccepted });
+      setPendingResume(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingResume, chatList]);
+
+  useEffect(() => {
+    if (!chatTimer.isRunning) setEnding(false);
+  }, [chatTimer.isRunning]);
+
+  useEffect(() => {
+    if (!peerConnection || !chatTimer.isRunning) { setPeerNote(null); return; }
+    if (peerConnection.connected) {
+      setPeerNote({ text: "Connection restored", tone: "ok" });
+      const t = setTimeout(() => setPeerNote(null), 3000);
+      return () => clearTimeout(t);
+    }
+    const total = Math.round((peerConnection.graceMs || 20000) / 1000);
+    const tick = () => {
+      const left = Math.max(0, total - Math.floor((Date.now() - peerConnection.since) / 1000));
+      setPeerNote({ text: `Client connection lost · waiting to reconnect (${left}s)`, tone: "warn" });
+    };
+    tick();
+    const i = setInterval(tick, 1000);
+    return () => clearInterval(i);
+  }, [peerConnection, chatTimer.isRunning]);
+
+  useEffect(() => {
+    if (!messageRejected) return;
+    setRejectNote(messageRejected.message || "Message not sent.");
+    const t = setTimeout(() => { setRejectNote(""); dispatch(setMessageRejected(null)); }, 4000);
+    return () => clearTimeout(t);
+  }, [messageRejected, dispatch]);
 
   useEffect(() => {
     const checkMobile = () => {
@@ -362,11 +443,7 @@ const ChatsPage = () => {
       console.error("[CHAT DEBUG] stopChat — missing ids", { tid, uid, cid, sid });
       return;
     }
-    dispatch(setChatTimerStopped());
-    setSeconds(0);
-    localStorage.removeItem("chatTimer");
-    localStorage.removeItem("activeChatUserId");
-    localStorage.removeItem("___U-B");
+    setEnding(true);
     const ok = await ensureSocketRegistered(cid, { role: SOCKET_ROLE.CONSULTANT });
     if (!ok) {
       console.error("[CHAT DEBUG] consultant register failed — endChat not sent");
@@ -374,8 +451,14 @@ const ChatsPage = () => {
     }
     socket.emit("endChat", { transactionId: tid, userId: uid, consultantId: cid, shopId: sid });
     dbg("Socket event emitted: endChat", { tid });
-    setRefreshed((prev) => !prev);
-    setShowChatEndPop(true);
+    // Idempotent REST fallback if the socket ack never arrives.
+    setTimeout(async () => {
+      try {
+        await axios.post(`${BACKEND}/api/chat/end-session/${tid}`, { endedBy: cid });
+      } catch (err) {
+        console.warn("[CHAT ERROR] end-session fallback:", err.message);
+      }
+    }, 6000);
   };
 
   const HandleRemoveUser = async (conversation) => {
@@ -400,7 +483,9 @@ const ChatsPage = () => {
     if (prevIsRunningRef.current === true && chatTimer.isRunning === false) {
       setShowChatEndToast(true);
       setShowChatEndPop(true);
+      setSeconds(0);
       localStorage.removeItem("activeChatUserId");
+      localStorage.removeItem("___U-B");
       setRefreshed((prev) => !prev);
     }
     prevIsRunningRef.current = chatTimer.isRunning;
@@ -631,13 +716,18 @@ const ChatsPage = () => {
                       <span className={styles.timerValue}>
                         {minutes}:{String(remainingSeconds).padStart(2, "0")}
                       </span>
-                      <button type="button" onClick={stopChatTimer} className={styles.dangerBtn}>
-                        End chat
+                      <button type="button" onClick={() => setShowEndConfirm(true)} className={styles.dangerBtn} disabled={ending}>
+                        {ending ? "Ending…" : "End chat"}
                       </button>
                     </div>
                   )}
                 </div>
 
+                {peerNote && (
+                  <div className={`${styles.peerBanner} ${peerNote.tone === "ok" ? styles.peerBannerOk : ""}`} role="status">
+                    {peerNote.text}
+                  </div>
+                )}
                 <div className={styles.messagesArea} ref={messagesAreaRef}>
                   {chatMessagesData.length === 0 ? (
                     <div className={styles.emptyChatState}>
@@ -672,10 +762,31 @@ const ChatsPage = () => {
                     <div className={styles.chatRequestBox}>
                       <div className={styles.chatIcon}>✓</div>
                       <div className={styles.chatRequestContent}>
-                        <h4>Chat ended</h4>
-                        <p>The session has been closed and billed.</p>
+                        <h4>
+                          {chatEndSummary?.endReason === "user_disconnected_timeout"
+                            ? "Chat ended — client did not reconnect"
+                            : chatEndSummary?.endReason === "consultant_disconnected_timeout"
+                              ? "Chat ended — you were disconnected"
+                              : chatEndSummary?.endReason === "insufficient_balance"
+                                ? "Chat ended — client credits exhausted"
+                                : String(chatEndSummary?.endedBy) === String(consultantId)
+                                  ? "You ended the chat"
+                                  : "Chat ended by the client"}
+                        </h4>
+                        <p>
+                          {chatEndSummary
+                            ? `Duration ${Math.ceil((chatEndSummary.durationSeconds || 0) / 60)} min · Billed ${formatCurrency(currency, chatEndSummary.finalAmount)} · Your share ${formatCurrency(currency, chatEndSummary.consultantShare)}`
+                            : "The session has been closed and billed."}
+                        </p>
                       </div>
-                      <button type="button" onClick={() => setShowChatEndPop(false)} className={styles.acceptBtn}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowChatEndPop(false);
+                          dispatch(clearChatEndSummary());
+                        }}
+                        className={styles.acceptBtn}
+                      >
                         OK
                       </button>
                     </div>
@@ -695,6 +806,7 @@ const ChatsPage = () => {
                   </div>
                 ) : null}
 
+                {rejectNote && <div className={styles.rejectNote} role="alert">{rejectNote}</div>}
                 <div className={styles.messageInputArea}>
                   <div className={`${styles.inputGroup} ${canSend ? "" : styles.inputGroupDisabled}`}>
                     <button type="button" className={styles.attachButton} title="Attach file" disabled={!canSend}>
@@ -739,6 +851,34 @@ const ChatsPage = () => {
         </div>
       </div>
 
+      {showEndConfirm && (
+        <PortalModal>
+          <div className="consultant-dashboard-shell">
+            <div className={styles.modalBackdrop} role="dialog" aria-modal="true" aria-labelledby="end-title">
+              <div className={styles.modalCard}>
+                <h3 id="end-title" className={styles.modalTitle}>End chat?</h3>
+                <p className={styles.modalText}>This will end the consultation and finalize billing for the client.</p>
+                <div className={styles.modalActions}>
+                  <button type="button" className={styles.modalGhost} onClick={() => setShowEndConfirm(false)} disabled={ending}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.modalDanger}
+                    disabled={ending}
+                    onClick={() => {
+                      setShowEndConfirm(false);
+                      stopChatTimer();
+                    }}
+                  >
+                    {ending ? "Ending…" : "End chat"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </PortalModal>
+      )}
       <ReactToast show={showChatEndToast} message="Chat ended" onClose={() => setShowChatEndToast(false)} />
     </Fragment>
   );

@@ -1,4 +1,5 @@
 import React, { Fragment, useEffect, useState, useRef, useCallback } from "react";
+import axios from "axios";
 import { useNavigate, useParams } from "react-router-dom";
 import styles from "./UserChat.module.css";
 import "../../css/storefront-tokens.css";
@@ -17,7 +18,14 @@ import InsufficientBalanceModal from "../AlertModel/InsuffientBalance";
 import ReactToast from "../AlertModel/ReactToast";
 import { fetchUserDetailsByIds } from "../Redux/slices/UserSlices";
 import { useWixUser } from "../../useContext/WixUserContext";
-import { setChatTimerStopped } from "../Redux/slices/sokectSlice";
+import {
+  setChatTimerStopped,
+  setChatTimerStarted,
+  clearChatEndSummary,
+  setMessageRejected,
+} from "../Redux/slices/sokectSlice";
+import { formatCurrency } from "../Helper/Helper";
+import PortalModal from "../middle-ware/PortalModal";
 
 const UserChat = () => {
   const [text, setText] = useState();
@@ -65,6 +73,14 @@ const UserChat = () => {
   const { userDetails } = useSelector((state) => state.users);
   const { confirmChat } = useSelector((state) => state.socket);
   const [isLock, seIsLock] = useState(false);
+  // ── server-authoritative session state ──
+  const [resumeSession, setResumeSession] = useState(null); // active session found on load
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
+  const [ending, setEnding] = useState(false);
+  const [rejectNote, setRejectNote] = useState("");
+  const [peerNote, setPeerNote] = useState(null); // { text, tone }
+  const { chatEndSummary, peerConnection, messageRejected } = useSelector((state) => state.socket);
+  const currency = userDetails?.data?.currency || "";
   
   useEffect(() => {
     if (userDetails?.data?.chatLock === "true") {
@@ -108,6 +124,76 @@ const UserChat = () => {
       }),
     );
   }, [shopId, consultantId]);
+
+  useEffect(() => {
+    if (!clientId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await axios.get(`${process.env.REACT_APP_BACKEND_HOST}/api/chat/active-session/${clientId}`);
+        if (cancelled) return;
+        if (!data?.active || !data.session) {
+          // Nothing active on the server: any local timer is stale.
+          if (chatTimer.isRunning) dispatch(setChatTimerStopped());
+          return;
+        }
+        console.log("[CHAT] Active session found on load", data.session.chatId);
+        setResumeSession(data.session);
+      } catch (err) {
+        console.warn("[CHAT ERROR] active-session check failed:", err.message);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId]);
+
+  const resumeActiveSession = () => {
+    if (!resumeSession) return;
+    console.log("[CHAT] Resuming session", resumeSession.chatId);
+    dispatch(
+      setChatTimerStarted({
+        transactionId: resumeSession.chatId,
+        startTime: resumeSession.startedAt,
+        userId: resumeSession.userId,
+        shopId: resumeSession.shopId,
+        consultantId: resumeSession.consultantId,
+      }),
+    );
+    setShowChatLock(false);
+    seIsLock(false);
+    setWaitingForAccept(false);
+    dispatch(clearChatEndSummary());
+    if (String(resumeSession.consultantId) !== String(consultantId)) {
+      const q = window.location.search || "";
+      navigate(`/chats/${resumeSession.consultantId}${q}`);
+    }
+    setResumeSession(null);
+  };
+
+  // Peer (consultant) connection banner with grace countdown
+  useEffect(() => {
+    if (!peerConnection || !chatTimer.isRunning) { setPeerNote(null); return; }
+    if (peerConnection.connected) {
+      setPeerNote({ text: "Connection restored", tone: "ok" });
+      const t = setTimeout(() => setPeerNote(null), 3000);
+      return () => clearTimeout(t);
+    }
+    const total = Math.round((peerConnection.graceMs || 20000) / 1000);
+    const tick = () => {
+      const left = Math.max(0, total - Math.floor((Date.now() - peerConnection.since) / 1000));
+      setPeerNote({ text: `Consultant connection lost · waiting to reconnect (${left}s)`, tone: "warn" });
+    };
+    tick();
+    const i = setInterval(tick, 1000);
+    return () => clearInterval(i);
+  }, [peerConnection, chatTimer.isRunning]);
+
+  useEffect(() => {
+    if (!messageRejected) return;
+    setRejectNote(messageRejected.message || "Message not sent.");
+    const t = setTimeout(() => { setRejectNote(""); dispatch(setMessageRejected(null)); }, 4000);
+    return () => clearTimeout(t);
+  }, [messageRejected, dispatch]);
 
   const isNearBottom = () => {
     if (!messagesAreaRef.current) return true;
@@ -441,13 +527,26 @@ const UserChat = () => {
       shopId: sid,
     });
 
+    setEnding(true);
     socket.emit("endChat", {
       transactionId: chatTimer.transactionId,
       userId: uid,
       consultantId: cid,
       shopId: sid,
     });
+    // Fallback if the socket ack never arrives: the REST path is idempotent.
+    setTimeout(async () => {
+      try {
+        await axios.post(`${process.env.REACT_APP_BACKEND_HOST}/api/chat/end-session/${chatTimer.transactionId}`, { endedBy: uid });
+      } catch (err) {
+        console.warn("[CHAT ERROR] end-session fallback:", err.message);
+      }
+    }, 6000);
   };
+
+  useEffect(() => {
+    if (!chatTimer.isRunning) setEnding(false);
+  }, [chatTimer.isRunning]);
 
   const handleChatSessionEnded = useCallback(() => {
     dispatch(setChatTimerStopped());
@@ -591,14 +690,24 @@ const UserChat = () => {
                         <span className={styles.timerValue}>
                           {minutes}:{String(remainingSeconds).padStart(2, "0")}
                         </span>
-                        <button type="button" onClick={stopChatTimer} className={styles.stopBtn}>
-                          End chat
+                        <button
+                          type="button"
+                          onClick={() => setShowEndConfirm(true)}
+                          className={styles.stopBtn}
+                          disabled={ending}
+                        >
+                          {ending ? "Ending…" : "End chat"}
                         </button>
                       </div>
                     )}
                   </div>
                 </div>
 
+                {peerNote && (
+                  <div className={`${styles.peerBanner} ${peerNote.tone === "ok" ? styles.peerBannerOk : ""}`} role="status">
+                    {peerNote.text}
+                  </div>
+                )}
                 {/* Messages Area */}
                 <div className={styles.messagesArea} ref={messagesAreaRef}>
 
@@ -652,6 +761,25 @@ const UserChat = () => {
                   )}
                 </div>
 
+                {chatEndSummary && !chatTimer.isRunning && (
+                  <div className={styles.endSummary} role="status">
+                    <strong>
+                      {chatEndSummary.endReason === "consultant_disconnected_timeout"
+                        ? "Chat ended — the consultant did not reconnect"
+                        : chatEndSummary.endReason === "user_disconnected_timeout"
+                          ? "Chat ended — you were disconnected"
+                          : chatEndSummary.endReason === "insufficient_balance"
+                            ? "Chat ended — credits exhausted"
+                            : String(chatEndSummary.endedBy) === String(clientId)
+                              ? "You ended the chat"
+                              : "Chat ended by the consultant"}
+                    </strong>
+                    <span>
+                      Duration {Math.ceil((chatEndSummary.durationSeconds || 0) / 60)} min · Charged{" "}
+                      {formatCurrency(currency, chatEndSummary.finalAmount)}
+                    </span>
+                  </div>
+                )}
                 {/* Session gate — outside the scroll area, above the composer */}
                   {showChatLock && (
                     <div className={styles.chatSessionAction}>
@@ -690,6 +818,7 @@ const UserChat = () => {
                             disabled={waitingForAccept ? true : false}
                             onClick={() => {
                               console.log("[CHAT DEBUG] User Start Chat clicked", { clientId, consultantId, shopId });
+                              dispatch(clearChatEndSummary());
                               sendChat("Hello");
                               setWaitingForAccept(true);
                               setTimeout(() => {
@@ -704,6 +833,9 @@ const UserChat = () => {
                     </div>
                   )}
 
+                {rejectNote && (
+                  <div className={styles.rejectNote} role="alert">{rejectNote}</div>
+                )}
                 {/* Message Input */}
                 <div className={styles.messageInputArea}>
                   <div className={`${styles.inputGroup} ${canSend ? "" : styles.inputGroupDisabled}`}>
@@ -764,6 +896,76 @@ const UserChat = () => {
           </div>
         </div>
       </div>
+      {resumeSession && (
+        <PortalModal>
+          <div className="customer-chat">
+            <div className={styles.modalBackdrop} role="dialog" aria-modal="true" aria-labelledby="resume-title">
+              <div className={styles.modalCard}>
+                <h3 id="resume-title" className={styles.modalTitle}>Active chat session</h3>
+                <p className={styles.modalText}>
+                  You have an active chat with <strong>{resumeSession.counterpart?.fullname || "a consultant"}</strong>,
+                  started {new Date(resumeSession.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.
+                  Billing continues until the session is ended.
+                </p>
+                <div className={styles.modalActions}>
+                  <button
+                    type="button"
+                    className={styles.modalGhost}
+                    disabled={ending}
+                    onClick={async () => {
+                      setEnding(true);
+                      try {
+                        await axios.post(`${process.env.REACT_APP_BACKEND_HOST}/api/chat/end-session/${resumeSession.chatId}`, { endedBy: clientId });
+                        console.log("[CHAT] Session ended from resume modal", resumeSession.chatId);
+                      } catch (err) {
+                        console.warn("[CHAT ERROR] end from modal:", err.message);
+                      } finally {
+                        setEnding(false);
+                        setResumeSession(null);
+                        setShowChatLock(true);
+                        if (clientId) dispatch(fetchUserDetailsByIds(clientId));
+                      }
+                    }}
+                  >
+                    {ending ? "Ending…" : "End chat"}
+                  </button>
+                  <button type="button" className={styles.modalPrimary} onClick={resumeActiveSession} disabled={ending}>
+                    Resume chat
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </PortalModal>
+      )}
+      {showEndConfirm && (
+        <PortalModal>
+          <div className="customer-chat">
+            <div className={styles.modalBackdrop} role="dialog" aria-modal="true" aria-labelledby="end-title">
+              <div className={styles.modalCard}>
+                <h3 id="end-title" className={styles.modalTitle}>End this consultation?</h3>
+                <p className={styles.modalText}>Your final charges will be calculated from the session time.</p>
+                <div className={styles.modalActions}>
+                  <button type="button" className={styles.modalGhost} onClick={() => setShowEndConfirm(false)} disabled={ending}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.modalDanger}
+                    disabled={ending}
+                    onClick={() => {
+                      setShowEndConfirm(false);
+                      stopChatTimer();
+                    }}
+                  >
+                    {ending ? "Ending…" : "End chat"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </PortalModal>
+      )}
       <ReactToast
         show={showChatEndToast}
         message="Chat ended"

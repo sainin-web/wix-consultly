@@ -14,8 +14,11 @@ async function emitToUser(io, onlineUsers, userId, event, payload) {
   const uid = String(userId);
   io.to(uid).emit(event, payload);
   const socketId = onlineUsers.get(uid);
+  // Direct copy ONLY if that socket is not already in its room — otherwise the
+  // same socket would receive every event twice.
   if (socketId) {
-    io.to(socketId).emit(event, payload);
+    const sock = io.sockets?.sockets?.get(socketId);
+    if (sock && !sock.rooms?.has(uid)) sock.emit(event, payload);
   }
   let roomCount = 0;
   try {

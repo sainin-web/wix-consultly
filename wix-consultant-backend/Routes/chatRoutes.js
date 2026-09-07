@@ -1,9 +1,18 @@
 const express = require("express");
-const { getChatHistory, getUserInRecentChat } = require("../Controller/chatController");
-const { authenticateToken } = require("../Auth/signup-signin");
+const {
+  getChatHistory,
+  getUserInRecentChat,
+  getActiveSession,
+  endSession,
+} = require("../Controller/chatController");
 const chatRoutes = express.Router();
 
 chatRoutes.get("/get/chat-history/:shopId/:userId/:consultantId", getChatHistory);
-chatRoutes.put("/update-user-request/:shopId/:userId/:consultantId",  getUserInRecentChat);
+chatRoutes.put("/update-user-request/:shopId/:userId/:consultantId", getUserInRecentChat);
 
-module.exports = chatRoutes;    
+// Server-authoritative session state (used on load / refresh by both clients)
+chatRoutes.get("/active-session/:userId", getActiveSession);
+// Idempotent end (same finalization path as the socket "endChat" event)
+chatRoutes.post("/end-session/:transactionId", endSession);
+
+module.exports = chatRoutes;

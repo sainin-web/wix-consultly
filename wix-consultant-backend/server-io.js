@@ -64,12 +64,8 @@ const ioServer = (server) => {
         } catch (e) {
           console.error("[CHAT ERROR] markConnected:", e.message);
         }
-        try {
-          const activeCall = await callSession.markConnected(uid);
-          if (activeCall) socket.emit("callResumed", activeCall);
-        } catch (e) {
-          console.error("[CALL ERROR] markConnected:", e.message);
-        }
+        // Call presence is per CALL TAB (call-attach), not per registered socket:
+        // the Wix page keeps its own socket open while the call runs in its tab.
         const replayed = await replayPending(
           io,
           onlineUsers,
@@ -113,6 +109,23 @@ const ioServer = (server) => {
         return;
       }
       socket.emit("callRequested", r.session);
+    });
+
+    // The dedicated call tab binds its socket to the call. From now on THIS
+    // socket is the participant's presence for grace/resume purposes.
+    socket.on("call-attach", async ({ callId } = {}) => {
+      const by = actingUser();
+      if (!by || !callId) return socket.emit("callAttached", { ok: false, reason: "not_registered" });
+      socket.data.callId = String(callId);
+      try {
+        const snap = await callSession.markConnected(by, callId);
+        console.log("[CALL SESSION] socket attached", { socket: socket.id, userId: by, callId: String(callId), status: snap?.status || "none" });
+        socket.emit("callAttached", { ok: Boolean(snap), callId: String(callId), status: snap?.status || null });
+        if (snap) socket.emit("callResumed", snap);
+      } catch (e) {
+        console.error("[CALL ERROR] attach:", e.message);
+        socket.emit("callAttached", { ok: false, callId: String(callId), reason: "error" });
+      }
     });
 
     socket.on("cancel-call", async ({ callId } = {}) => {
@@ -497,13 +510,22 @@ const ioServer = (server) => {
           console.error("[socket] isActive update error:", err.message);
         }
         try {
-          // Only if this was the user's LAST socket (a reconnect replaces the map entry first).
-          if (!onlineUsers.has(uid)) {
-            await chatSession.markDisconnected(uid);
+          // Chat: only if this was the user's LAST socket (a reconnect replaces the map entry first).
+          if (!onlineUsers.has(uid)) await chatSession.markDisconnected(uid);
+        } catch (err) {
+          console.error("[CHAT ERROR] markDisconnected:", err.message);
+        }
+        try {
+          // Call: the participant is "gone" when no socket attached to the call
+          // remains — whether this was the call tab or the user's last socket.
+          let callSocketAlive = false;
+          try { callSocketAlive = (await io.in(uid).fetchSockets()).some((s) => s.data?.callId); } catch (e) { /* assume none */ }
+          if (!callSocketAlive && (socket.data.callId || !onlineUsers.has(uid))) {
+            console.log("[CALL DISCONNECT] presence lost", { userId: uid, wasCallTab: Boolean(socket.data.callId), reason });
             await callSession.markDisconnected(uid);
           }
         } catch (err) {
-          console.error("[CHAT ERROR] markDisconnected:", err.message);
+          console.error("[CALL ERROR] markDisconnected:", err.message);
         }
         broadcastOnlineUsers(io, onlineUsers);
         console.log("[socket] remaining online:", [...onlineUsers.keys()]);

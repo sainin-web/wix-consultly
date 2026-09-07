@@ -482,6 +482,7 @@ async function markDisconnected(userId) {
     return null; // consultant dropped while ringing → ring timeout handles it
   }
   if (!BILLABLE_LOCK.includes(s.status)) return null;
+  if (s[`${role}Connected`] === false) return { cid, role, already: true }; // grace already running — never restart it
   await CallSession.updateOne({ _id: cid }, { $set: { [`${role}Connected`]: false, [`${role}DisconnectedAt`]: new Date() } });
   const other = role === "user" ? idOf(s.receiverId) : idOf(s.callerId);
   console.log(`[CALL DISCONNECT] ${role === "user" ? "User" : "Consultant"} disconnected`, { callId: cid, status: s.status });
@@ -508,9 +509,10 @@ async function onGraceExpired(cid, role) {
   await endAndBroadcast({ callId: cid, endedBy: "system", endReason: `${role}_disconnected_timeout` });
 }
 
-async function markConnected(userId) {
+async function markConnected(userId, callId = null) {
   const s = await getActiveCallForUser(userId);
   if (!s) return null;
+  if (callId && String(s._id) !== String(callId)) return null; // attached to a stale call
   const role = roleFor(s, userId);
   if (!role) return null;
   const cid = String(s._id);

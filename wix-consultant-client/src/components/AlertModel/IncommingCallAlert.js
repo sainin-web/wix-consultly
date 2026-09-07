@@ -1,13 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { useSelector, useDispatch } from "react-redux";
-import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { setIncomingCall } from "../Redux/slices/sokectSlice";
 import { ensureSocketRegistered, SOCKET_ROLE } from "../Sokect-io/SokectConfig";
 import { bindSocketListeners } from "../Sokect-io/socketEventBridge";
 import TestRingtone from "../../pages/TestRingtone";
 import { getConsultantId } from "../../utils/wixStorage";
-import { callPagePath } from "../middle-ware/OpenCallingPage";
+import { reserveCallTab, navigateCallTab, closeReservedTab } from "../../utils/callTab";
 
 const BACKEND = process.env.REACT_APP_BACKEND_HOST;
 const DEFAULT_AVATAR = "/images/flag/teamdefault.png";
@@ -36,7 +35,6 @@ const css = `
 
 export default function IncomingCallAlert() {
   const dispatch = useDispatch();
-  const navigate = useNavigate();
   const consultantId = getConsultantId();
   const { incomingCall, callEvent } = useSelector((state) => state.socket);
   const [busy, setBusy] = useState(false);
@@ -76,16 +74,24 @@ export default function IncomingCallAlert() {
 
   const accept = async () => {
     if (busy) return;
+    // The call ALWAYS runs in a dedicated top-level tab. Reserve it synchronously
+    // inside the click (popup blockers), then accept, then point the tab at the call.
+    const tab = reserveCallTab("consultant");
+    if (!tab) {
+      setError("Your browser blocked the call window. Allow pop-ups for this site, then press Accept again.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
       await ensureSocketRegistered(consultantId, { role: SOCKET_ROLE.CONSULTANT });
       const { data } = await axios.post(`${BACKEND}/api/call/accept/${callId}`, { userId: consultantId });
       if (!data?.success) throw new Error(data?.message || "Could not accept");
-      console.log("[CALL] accepted", callId);
+      console.log("[CALL ACCEPT] accepted → call tab", callId);
       dispatch(setIncomingCall(null));
-      navigate(callPagePath(callId, "/consultant-dashboard"));
+      navigateCallTab(tab, { callId, as: "consultant" });
     } catch (err) {
+      closeReservedTab(tab);
       const code = err.response?.data?.code || "";
       setError(code ? "This call is no longer available." : err.message);
       setTimeout(() => dispatch(setIncomingCall(null)), 1500);

@@ -9,6 +9,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { KEYS, getCustomerId } from "../../utils/wixStorage";
 import { ensureSocketRegistered, SOCKET_ROLE } from "../Sokect-io/SokectConfig";
 import { checkUserBalance, openCallPage } from "../middle-ware/OpenCallingPage";
+import { reserveCallTab, navigateCallTab, closeReservedTab } from "../../utils/callTab";
 import { fetchVoucherData } from "../Redux/slices/UserSlices";
 import { useWixUser } from "../../useContext/WixUserContext";
 
@@ -208,18 +209,24 @@ function ConsultantCards() {
       setLoginPrompt(true);
       return;
     }
+    // Reserve the call tab synchronously (popup blockers), then ask the server.
+    const tab = reserveCallTab("user");
+    if (!tab) {
+      setCallError("Your browser blocked the call window. Allow pop-ups for this site and try again.");
+      return;
+    }
     const result = await openCallPage({
       receiverId,
       type,
       userId,
       shop,
       storeUrl: shop_id || shop,
-      returnTo: window.location.pathname,
     });
     if (result?.ok) {
-      navigate(result.path);
+      navigateCallTab(tab, { callId: result.callId, as: "user" });
       return;
     }
+    closeReservedTab(tab);
     if (result?.code === "login_required") {
       setLoginPrompt(true);
       return;

@@ -5,6 +5,7 @@ import "../../components/ConsultantCards/ConsultantCards.css";
 import { useDispatch, useSelector } from "react-redux";
 import { fetchConsultantById } from "../Redux/slices/ConsultantSlices";
 import { checkUserBalance, openCallPage } from "../middle-ware/OpenCallingPage";
+import { reserveCallTab, navigateCallTab, closeReservedTab } from "../../utils/callTab";
 import { fetchVoucherData } from "../Redux/slices/UserSlices";
 import { useWixUser } from "../../useContext/WixUserContext";
 import { getCustomerId } from "../../utils/wixStorage";
@@ -34,14 +35,15 @@ function ViewProfile() {
   const consultantView = consultantOverview?.consultant;
   const imageUrl = `${process.env.REACT_APP_BACKEND_HOST}/${consultantView?.profileImage?.replace("\\", "/")}`;
 
+  const [callError, setCallError] = useState("");
   const startCall = async ({ receiverId, type }) => {
-    await openCallPage({
-      receiverId,
-      type,
-      userId,
-      shop: shop_id,
-      storeUrl: shop_id,
-    });
+    if (!userId) return;
+    const tab = reserveCallTab("user"); // synchronously in the click (popup blockers)
+    if (!tab) { setCallError("Your browser blocked the call window. Allow pop-ups for this site and try again."); return; }
+    const result = await openCallPage({ receiverId, type, userId, shop: shop_id, storeUrl: shop_id });
+    if (result?.ok) { navigateCallTab(tab, { callId: result.callId, as: "user" }); return; }
+    closeReservedTab(tab);
+    setCallError(result?.message || "Call could not be started. Please try again.");
   };
 
   const startChat = async (consultantId) => {
@@ -69,6 +71,17 @@ function ViewProfile() {
 
   return (
     <div className="view-profile-container">
+      {callError && (
+        <div className="cc-modal" role="alertdialog" aria-modal="true" aria-labelledby="vp-call-err">
+          <div className="cc-modal__panel">
+            <h2 className="cc-modal__title" id="vp-call-err">Unable to start the call</h2>
+            <p className="cc-modal__text">{callError}</p>
+            <div className="cc-modal__actions">
+              <button type="button" className="cc-modal__btn cc-modal__btn--primary" onClick={() => setCallError("")}>OK</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="container py-4">
         {/* Back Button */}
         <button

@@ -14,7 +14,7 @@ import ConsultantProfileModal from "./ConsultantProfileModal";
 import axios from "axios";
 import DashboardTopNav, { NAV_ICONS } from "./DashboardTopNav";
 import { markAllNotificationsRead, dismissNotificationsFrom } from "../Redux/slices/sokectSlice";
-import { callPagePath } from "../middle-ware/OpenCallingPage";
+import ActiveCallGate from "../AlertModel/ActiveCallGate";
 
 const isWixEmbed = () =>
   typeof window !== "undefined" && window.self !== window.top;
@@ -119,25 +119,8 @@ function TabNavigation({ children }) {
     ensureSocketRegistered(userId, { role: SOCKET_ROLE.CONSULTANT });
   }, [userId]);
 
-  // Refresh during a live call → the server still has it → go straight back in.
-  useEffect(() => {
-    if (!userId || location.pathname.startsWith("/video/calling")) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const { data } = await axios.get(`${process.env.REACT_APP_BACKEND_HOST}/api/call/active-session/${userId}`);
-        if (cancelled || !data?.hasActiveCall) return;
-        let inOtherTab = false;
-        try { inOtherTab = Boolean(sessionStorage.getItem(`call_in_tab:${data.call?.callId}`)); } catch (e) { /* ignore */ }
-        if (!inOtherTab && ["accepted", "connecting", "active"].includes(data.call?.status)) {
-          console.log("[CALL] consultant refresh → resuming call", data.call.callId);
-          navigate(callPagePath(data.call.callId, "/consultant-dashboard"), { replace: true });
-        }
-      } catch (err) { /* ignore */ }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
+  // A live call is never rendered inside the dashboard: ActiveCallGate (below)
+  // shows "call in progress" / "Rejoin" and opens the dedicated call tab.
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -277,6 +260,7 @@ function TabNavigation({ children }) {
 
   return (
     <Fragment>
+      {userId && <ActiveCallGate userId={userId} role="consultant" />}
       <ConsultantProfileModal
         show={showModal}
         handleClose={() => setShowModal(false)}

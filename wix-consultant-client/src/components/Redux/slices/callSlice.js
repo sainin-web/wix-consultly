@@ -23,6 +23,8 @@ let listenersBound = false;
 
 export const getLocalVideoTrack = () => localVideoTrack;
 export const getRemoteVideoTrack = () => remoteVideoTrack;
+export const getRemoteAudioTrack = () => remoteAudioTrack;
+let speakerId = null; // chosen output device, re-applied to every new remote audio track
 export const getAgoraClient = () => client;
 
 /** Map SDK errors to something a human can act on. */
@@ -168,6 +170,7 @@ function bindClientListeners() {
       await client.subscribe(user, mediaType);
       if (mediaType === "audio") {
         remoteAudioTrack = user.audioTrack;
+        if (speakerId && remoteAudioTrack?.setPlaybackDevice) { try { await remoteAudioTrack.setPlaybackDevice(speakerId); } catch (e) { /* keep default */ } }
         remoteAudioTrack?.play();
         dispatchRef?.(callSlice.actions.setRemoteMedia({ audio: true }));
       } else if (mediaType === "video") {
@@ -318,12 +321,32 @@ export const enableMicrophone = createAsyncThunk("call/enableMicrophone", async 
   }
 });
 
+/** Switch the microphone without republishing. */
+export const setMicrophoneDevice = createAsyncThunk("call/setMicrophone", async (deviceId, { rejectWithValue }) => {
+  try {
+    if (localAudioTrack && deviceId) await localAudioTrack.setDevice(deviceId);
+    console.log("[CALL DEBUG] microphone switched");
+    return deviceId;
+  } catch (err) { return rejectWithValue(err?.message || "mic"); }
+});
+
+/** Choose the speaker (Chrome/Edge expose audiooutput devices). */
+export const setSpeakerDevice = createAsyncThunk("call/setSpeaker", async (deviceId, { rejectWithValue }) => {
+  try {
+    speakerId = deviceId || null;
+    if (remoteAudioTrack?.setPlaybackDevice && deviceId) await remoteAudioTrack.setPlaybackDevice(deviceId);
+    console.log("[CALL DEBUG] speaker switched");
+    return deviceId;
+  } catch (err) { return rejectWithValue(err?.message || "speaker"); }
+});
+
 export const leaveCall = createAsyncThunk("call/leave", async () => {
   remoteAudioTrack?.stop();
   remoteVideoTrack?.stop();
   remoteAudioTrack = null;
   remoteVideoTrack = null;
   await releaseLocalTracks();
+  speakerId = null;
   try {
     if (client.connectionState !== "DISCONNECTED") await client.leave();
   } catch (e) { /* ignore */ }
@@ -345,6 +368,8 @@ const initialState = {
   mediaError: null,
   mediaWarning: null,
   micRetrying: false,
+  micId: "",
+  speakerId: "",
 };
 
 const callSlice = createSlice({
@@ -403,6 +428,8 @@ const callSlice = createSlice({
         state.micRetrying = false;
         if (action.payload?.message) state.mediaWarning = { code: action.payload.code || "no_microphone", message: action.payload.message };
       })
+      .addCase(setMicrophoneDevice.fulfilled, (state, action) => { state.micId = action.payload || ""; })
+      .addCase(setSpeakerDevice.fulfilled, (state, action) => { state.speakerId = action.payload || ""; })
       .addCase(leaveCall.fulfilled, () => initialState);
   },
 });

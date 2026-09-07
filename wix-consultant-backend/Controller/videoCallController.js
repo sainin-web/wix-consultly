@@ -93,14 +93,21 @@ const activeSession = async (req, res) => {
     if (!s) return res.status(200).json({ success: true, hasActiveCall: false, call: null });
     const parties = await callSession.withParties(s);
     const role = String(s.callerId) === String(userId) ? "user" : "consultant";
+    const tabAttached = await callSession.isTabAttached(userId, s._id);
     return res.status(200).json({
       success: true,
       hasActiveCall: true,
-      call: callSession.snapshot(s, {
-        role,
-        participant: role === "user" ? parties.receiver : parties.caller,
-        ratePerMinute: parties.ratePerMinute,
-      }),
+      call: {
+        ...callSession.snapshot(s, {
+          role,
+          participant: role === "user" ? parties.receiver : parties.caller,
+          ratePerMinute: parties.ratePerMinute,
+        }),
+        // true while this user's dedicated call tab holds an attached socket —
+        // the original page uses it instead of cross-tab messaging (which the
+        // browser partitions for embedded pages).
+        tabAttached,
+      },
     });
   } catch (error) {
     console.error("[CALL ERROR] activeSession:", error.message);

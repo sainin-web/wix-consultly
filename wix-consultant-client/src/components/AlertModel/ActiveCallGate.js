@@ -59,6 +59,13 @@ export default function ActiveCallGate({ userId: userIdProp, role = "user" }) {
   }, [userId]);
 
   useEffect(() => { check(); }, [check]);
+  // While a call exists, poll the server flag: BroadcastChannel/localStorage are
+  // partitioned for the Wix embed, so the server is the reliable "tab open" signal.
+  useEffect(() => {
+    if (!call) return;
+    const i = setInterval(check, 5000);
+    return () => clearInterval(i);
+  }, [call, check]);
   useEffect(() => { if (callEvent && LIFECYCLE.includes(callEvent.type)) check(); }, [callEvent, check]);
 
   useEffect(() => subscribeCallTab((m) => {
@@ -75,13 +82,13 @@ export default function ActiveCallGate({ userId: userIdProp, role = "user" }) {
 
   if (!call || !userId) return null;
 
-  const inTab = live && live.callId === String(call.callId);
+  const inTab = Boolean(call.tabAttached) || (live && live.callId === String(call.callId));
   const who = call.participant?.fullname || (role === "consultant" ? "Client" : "Consultant");
   const kind = call.callType === "video" ? "Video call" : "Audio call";
 
   const rejoin = () => {
     setError("");
-    const w = focusOrOpenCallTab({ callId: call.callId, as: role });
+    const w = focusOrOpenCallTab({ callId: call.callId, as: role, uid: userId });
     if (!w) setError("Your browser blocked the call tab. Allow pop-ups for this site and try again.");
   };
   const end = async () => {

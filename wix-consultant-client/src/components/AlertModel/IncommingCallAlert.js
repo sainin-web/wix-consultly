@@ -76,7 +76,7 @@ export default function IncomingCallAlert() {
     if (busy) return;
     // The call ALWAYS runs in a dedicated top-level tab. Reserve it synchronously
     // inside the click (popup blockers), then accept, then point the tab at the call.
-    const tab = reserveCallTab("consultant");
+    const tab = reserveCallTab("consultant", consultantId);
     if (!tab) {
       setError("Your browser blocked the call window. Allow pop-ups for this site, then press Accept again.");
       return;
@@ -89,7 +89,7 @@ export default function IncomingCallAlert() {
       if (!data?.success) throw new Error(data?.message || "Could not accept");
       console.log("[CALL ACCEPT] accepted → call tab", callId);
       dispatch(setIncomingCall(null));
-      navigateCallTab(tab, { callId, as: "consultant" });
+      navigateCallTab(tab, { callId, as: "consultant", uid: consultantId });
     } catch (err) {
       closeReservedTab(tab);
       const code = err.response?.data?.code || "";

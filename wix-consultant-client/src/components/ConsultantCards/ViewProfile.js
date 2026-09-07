@@ -38,10 +38,10 @@ function ViewProfile() {
   const [callError, setCallError] = useState("");
   const startCall = async ({ receiverId, type }) => {
     if (!userId) return;
-    const tab = reserveCallTab("user"); // synchronously in the click (popup blockers)
+    const tab = reserveCallTab("user", userId); // synchronously in the click (popup blockers)
     if (!tab) { setCallError("Your browser blocked the call window. Allow pop-ups for this site and try again."); return; }
     const result = await openCallPage({ receiverId, type, userId, shop: shop_id, storeUrl: shop_id });
-    if (result?.ok) { navigateCallTab(tab, { callId: result.callId, as: "user" }); return; }
+    if (result?.ok) { navigateCallTab(tab, { callId: result.callId, as: "user", uid: userId }); return; }
     closeReservedTab(tab);
     setCallError(result?.message || "Call could not be started. Please try again.");
   };

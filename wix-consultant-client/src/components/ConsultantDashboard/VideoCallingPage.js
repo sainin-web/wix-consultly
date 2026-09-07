@@ -48,8 +48,13 @@ const I = {
   gear: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>,
 };
 
-/** Who am I in this tab? The URL says so; localStorage (shared with the Wix page) has the ids. */
-function resolveIdentity(as) {
+/**
+ * Who am I in this tab? The URL carries role + id (the opener put them there),
+ * because localStorage written inside the Wix iframe is partitioned by the
+ * browser and invisible to this top-level tab. Storage is only a fallback.
+ */
+function resolveIdentity(as, uid) {
+  if (uid && (as === "consultant" || as === "user")) return { me: uid, isConsultant: as === "consultant" };
   if (as === "consultant") return { me: getConsultantId(), isConsultant: true };
   if (as === "user") return { me: getCustomerId(), isConsultant: false };
   const isC = isConsultantSession();
@@ -61,7 +66,7 @@ function VideoCallingPage() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const callId = params.get("callId");
   const preparing = params.get("preparing") === "1" && !callId;
-  const { me, isConsultant } = useMemo(() => resolveIdentity(params.get("as")), [params]);
+  const { me, isConsultant } = useMemo(() => resolveIdentity(params.get("as"), params.get("uid")), [params]);
 
   const media = useSelector((s) => s.call);
   const { callEvent, callPeer, callEndSummary } = useSelector((s) => s.socket);

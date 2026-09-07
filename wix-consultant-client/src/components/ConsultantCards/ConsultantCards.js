@@ -210,7 +210,7 @@ function ConsultantCards() {
       return;
     }
     // Reserve the call tab synchronously (popup blockers), then ask the server.
-    const tab = reserveCallTab("user");
+    const tab = reserveCallTab("user", userId);
     if (!tab) {
       setCallError("Your browser blocked the call window. Allow pop-ups for this site and try again.");
       return;
@@ -223,7 +223,7 @@ function ConsultantCards() {
       storeUrl: shop_id || shop,
     });
     if (result?.ok) {
-      navigateCallTab(tab, { callId: result.callId, as: "user" });
+      navigateCallTab(tab, { callId: result.callId, as: "user", uid: userId });
       return;
     }
     closeReservedTab(tab);

@@ -23,10 +23,17 @@ const instanceParam = () => {
 };
 
 /** Absolute URL of the standalone call page. */
-export function buildCallUrl({ callId, as, preparing } = {}) {
+/*
+ * Identity travels in the URL. Browsers partition localStorage for third-party
+ * iframes (the Wix embed), so a top-level tab of the same origin cannot read
+ * what the embedded page stored. The server verifies on every request that
+ * uid is a participant of callId, so the URL grants nothing by itself.
+ */
+export function buildCallUrl({ callId, as, uid, preparing } = {}) {
   const q = new URLSearchParams();
   if (callId) q.set("callId", callId);
   if (as) q.set("as", as);
+  if (uid) q.set("uid", uid);
   if (preparing) q.set("preparing", "1");
   const inst = instanceParam();
   if (inst) q.set("instance", inst);
@@ -34,9 +41,9 @@ export function buildCallUrl({ callId, as, preparing } = {}) {
 }
 
 /** Call synchronously inside the click gesture. Returns the tab or null (blocked). */
-export function reserveCallTab(as) {
+export function reserveCallTab(as, uid) {
   try {
-    const w = window.open(buildCallUrl({ as, preparing: true }), CALL_TAB_NAME);
+    const w = window.open(buildCallUrl({ as, uid, preparing: true }), CALL_TAB_NAME);
     if (!w) { console.warn("[CALL TAB] popup blocked"); return null; }
     lastTab = w;
     try { w.focus(); } catch (e) { /* ignore */ }
@@ -49,10 +56,10 @@ export function reserveCallTab(as) {
 }
 
 /** Point a reserved tab at the real call. */
-export function navigateCallTab(tab, { callId, as }) {
+export function navigateCallTab(tab, { callId, as, uid }) {
   if (!tab || tab.closed) return false;
   try {
-    tab.location.href = buildCallUrl({ callId, as });
+    tab.location.href = buildCallUrl({ callId, as, uid });
     try { tab.focus(); } catch (e) { /* ignore */ }
     console.log("[CALL TAB] navigated", { callId, as });
     return true;
@@ -67,12 +74,12 @@ export function closeReservedTab(tab) {
 }
 
 /** Rejoin/switch: focus the existing call tab, or open the call page (needs a click gesture). */
-export function focusOrOpenCallTab({ callId, as }) {
+export function focusOrOpenCallTab({ callId, as, uid }) {
   if (lastTab && !lastTab.closed) {
     try { lastTab.focus(); return lastTab; } catch (e) { /* fall through */ }
   }
   try {
-    const w = window.open(buildCallUrl({ callId, as }), CALL_TAB_NAME);
+    const w = window.open(buildCallUrl({ callId, as, uid }), CALL_TAB_NAME);
     if (w) { lastTab = w; try { w.focus(); } catch (e) { /* ignore */ } }
     return w || null;
   } catch (e) { return null; }

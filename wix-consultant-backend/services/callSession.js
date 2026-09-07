@@ -44,6 +44,15 @@ function setIo(io, onlineUsers) {
   onlineRef = onlineUsers;
 }
 
+/** Is a dedicated call tab (socket attached via call-attach) open for this user+call? */
+async function isTabAttached(userId, callId) {
+  if (!ioRef) return false;
+  try {
+    const sockets = await ioRef.in(String(userId)).fetchSockets();
+    return sockets.some((s) => String(s.data?.callId || "") === String(callId));
+  } catch (e) { return false; }
+}
+
 function emitTo(userId, event, payload) {
   if (!ioRef || !userId) return;
   const uid = String(userId);
@@ -672,6 +681,7 @@ async function recoverCallSessions() {
 }
 
 module.exports = {
+  isTabAttached,
   GRACE_MS,
   RING_TIMEOUT_MS,
   CONNECT_TIMEOUT_MS,

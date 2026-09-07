@@ -2,6 +2,7 @@ import { Outlet, useLocation } from "react-router-dom";
 import WixInstanceGuard from "./WixInstanceGuard";
 import ProtectStoreFront from "./ProtectStoreFront";
 import StorefrontNavbar from "../Navbar/StorefrontNavbar";
+import ActiveCallGate from "../AlertModel/ActiveCallGate";
 
 /**
  * Route prefixes that run in "consultant mode". Inside these, the public
@@ -41,6 +42,7 @@ export default function StorefrontShell({
       <ProtectStoreFront>
         <div className={className}>
           {renderNavbar && <StorefrontNavbar />}
+          {!consultantMode && <ActiveCallGate />}
           {children || <Outlet />}
         </div>
       </ProtectStoreFront>

@@ -28,6 +28,8 @@ import {
   setMessageRejected,
   pushNotification,
   pushMissedCall,
+  setCallEvent,
+  setCallPeer,
 } from "../Redux/slices/sokectSlice";
 
 let dispatchRef = null;
@@ -56,6 +58,16 @@ const EVENTS = [
   ["callEnded", "callEnded"],
   ["call-ended-rejected", "callEndedRejected"],
   ["acceptUser", "acceptUser"],
+  ["callRinging", "callRinging"],
+  ["callAccepted", "callAccepted"],
+  ["callConnected", "callConnected"],
+  ["callRejected", "callRejected"],
+  ["callCancelled", "callCancelled"],
+  ["callMissed", "callMissed"],
+  ["callFailed", "callFailed"],
+  ["callResumed", "callResumed"],
+  ["creditsWarning", "creditsWarning"],
+  ["creditsExhausted", "creditsExhausted"],
 ];
 
 export function setSocketDispatch(dispatch) {
@@ -123,10 +135,29 @@ function createHandlers() {
     console.warn("[CHAT ERROR] chatEndFailed", payload);
   };
   handlers.autoChatEnded = (data) => dispatchRef?.(setAutoChatEnded(data));
-  handlers.participantDisconnected = (p) =>
-    dispatchRef?.(setPeerConnection({ ...p, connected: false, since: Date.now() }));
-  handlers.participantReconnected = (p) =>
-    dispatchRef?.(setPeerConnection({ ...p, connected: true, since: Date.now() }));
+  handlers.participantDisconnected = (p) => {
+    const state = { ...p, connected: false, since: Date.now() };
+    if (p?.kind === "call") dispatchRef?.(setCallPeer(state));
+    else dispatchRef?.(setPeerConnection(state));
+  };
+  handlers.participantReconnected = (p) => {
+    const state = { ...p, connected: true, since: Date.now() };
+    if (p?.kind === "call") dispatchRef?.(setCallPeer(state));
+    else dispatchRef?.(setPeerConnection(state));
+  };
+  const callEv = (type) => (payload) => {
+    console.log("[CALL] event", type, payload?.callId || "");
+    dispatchRef?.(setCallEvent({ type, payload }));
+  };
+  handlers.callRinging = callEv("ringing");
+  handlers.callAccepted = callEv("accepted");
+  handlers.callConnected = callEv("connected");
+  handlers.callRejected = callEv("rejected");
+  handlers.callCancelled = callEv("cancelled");
+  handlers.callFailed = callEv("failed");
+  handlers.callResumed = callEv("resumed");
+  handlers.creditsWarning = callEv("creditsWarning");
+  handlers.creditsExhausted = callEv("creditsExhausted");
   handlers.messageRejected = (p) => {
     console.warn("[CHAT] message rejected by server", p);
     dispatchRef?.(setMessageRejected(p));
@@ -134,12 +165,14 @@ function createHandlers() {
   handlers.callAcceptedStarted = (data) => dispatchRef?.(setCallAccepted(data));
   handlers.callMissed = (data) => {
     dispatchRef?.(setCallEnded(data));
-    // Only the callee sees a "missed call" — the caller was the one ringing.
-    const me = getSocketRegisterId();
-    const receiverId = data?.callId ? String(data.callId).split("_")[1] : null;
-    if (me && receiverId && String(receiverId) === String(me)) dispatchRef?.(pushMissedCall(data));
+    dispatchRef?.(setCallEvent({ type: "missed", payload: data }));
+    // The bell entry is decided in the reducer (callee only).
+    dispatchRef?.(pushMissedCall({ ...data, me: getSocketRegisterId() }));
   };
-  handlers.callEnded = (data) => dispatchRef?.(setCallEnded(data));
+  handlers.callEnded = (data) => {
+    dispatchRef?.(setCallEnded(data));
+    if (data?.callId) dispatchRef?.(setCallEvent({ type: "ended", payload: data }));
+  };
   handlers.callEndedRejected = (data) => {
     dispatchRef?.(setCallRejected(data));
     dispatchRef?.(setCallEnded(data));

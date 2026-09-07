@@ -1,223 +1,139 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useSelector, useDispatch } from "react-redux";
-import {
-  setIncomingCall,
-  setCallRejected,
-} from "../Redux/slices/sokectSlice";
-import {
-  socket,
-  ensureSocketRegistered,
-  SOCKET_ROLE,
-} from "../Sokect-io/SokectConfig";
-import { bindSocketListeners } from "../Sokect-io/socketEventBridge";
-import { checkMicPermission } from "../ConsultantCards/ConsultantCards";
-import TestRingtone from "../../pages/TestRingtone";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
-import {
-  buildCallPageUrl,
-  navigateToCallPage,
-} from "../middle-ware/OpenCallingPage";
-import { getConsultantId, getShopId } from "../../utils/wixStorage";
+import { setIncomingCall } from "../Redux/slices/sokectSlice";
+import { ensureSocketRegistered, SOCKET_ROLE } from "../Sokect-io/SokectConfig";
+import { bindSocketListeners } from "../Sokect-io/socketEventBridge";
+import TestRingtone from "../../pages/TestRingtone";
+import { getConsultantId } from "../../utils/wixStorage";
+import { callPagePath } from "../middle-ware/OpenCallingPage";
+
+const BACKEND = process.env.REACT_APP_BACKEND_HOST;
+const DEFAULT_AVATAR = "/images/flag/teamdefault.png";
+
+const css = `
+.ic-card{position:fixed;top:16px;right:16px;z-index:100000;width:340px;max-width:calc(100vw - 32px);padding:16px;background:#fff;border:1px solid #e6e8ec;border-radius:14px;box-shadow:0 16px 40px -8px rgba(16,24,40,.25);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#111318;animation:icIn .25s ease}
+@keyframes icIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+.ic-kicker{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#666b78;margin-bottom:10px}
+.ic-dot{width:8px;height:8px;border-radius:50%;background:#067647;animation:icPulse 1.2s infinite}
+@keyframes icPulse{0%,100%{box-shadow:0 0 0 0 rgba(6,118,71,.35)}50%{box-shadow:0 0 0 6px rgba(6,118,71,0)}}
+.ic-who{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.ic-avatar{width:48px;height:48px;border-radius:50%;object-fit:cover;background:#eeeff2;border:1px solid #e6e8ec;flex-shrink:0}
+.ic-name{font-size:15px;font-weight:650;line-height:1.2}
+.ic-sub{font-size:12.5px;color:#666b78;margin-top:2px}
+.ic-actions{display:flex;gap:8px}
+.ic-btn{flex:1;padding:10px 12px;border-radius:9px;border:0;font-family:inherit;font-size:13.5px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.ic-decline{background:#fef3f2;color:#b42318;border:1px solid #f4b4ae}
+.ic-decline:hover{background:#fde4e1}
+.ic-accept{background:#067647;color:#fff}
+.ic-accept:hover{background:#05633b}
+.ic-btn:disabled{opacity:.6;cursor:not-allowed}
+.ic-bar{height:3px;border-radius:999px;background:#eeeff2;overflow:hidden;margin-top:12px}
+.ic-bar > span{display:block;height:100%;background:#067647;transition:width 1s linear}
+.ic-err{margin-top:8px;font-size:12.5px;color:#b42318}
+`;
 
 export default function IncomingCallAlert() {
   const dispatch = useDispatch();
+  const navigate = useNavigate();
   const consultantId = getConsultantId();
-  const { incomingCall, callEnded, callRejected } = useSelector(
-    (state) => state.socket,
-  );
+  const { incomingCall, callEvent } = useSelector((state) => state.socket);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [left, setLeft] = useState(null);
 
   useEffect(() => {
     if (!consultantId) return;
-    ensureSocketRegistered(consultantId, { role: SOCKET_ROLE.CONSULTANT }).then(
-      (ok) => {
-        if (ok) bindSocketListeners();
-      },
-    );
+    ensureSocketRegistered(consultantId, { role: SOCKET_ROLE.CONSULTANT }).then((ok) => ok && bindSocketListeners());
   }, [consultantId]);
 
+  // The server settles the ring: cancelled by caller, missed (timeout), or ended.
   useEffect(() => {
-    if ((callEnded || callRejected) && incomingCall) {
+    if (!incomingCall || !callEvent) return;
+    const same = String(callEvent.payload?.callId) === String(incomingCall.callId);
+    if (same && ["cancelled", "missed", "ended", "failed"].includes(callEvent.type)) {
       dispatch(setIncomingCall(null));
     }
-  }, [callEnded, callRejected, incomingCall, dispatch]);
+  }, [callEvent, incomingCall, dispatch]);
 
-  if (!incomingCall) return null;
+  // Ring countdown (display only; the server owns the timeout)
+  useEffect(() => {
+    if (!incomingCall) { setLeft(null); setError(""); return; }
+    const total = Math.round((incomingCall.ringTimeoutMs || 30000) / 1000);
+    const startedAt = Date.now();
+    const tick = () => setLeft(Math.max(0, total - Math.floor((Date.now() - startedAt) / 1000)));
+    tick();
+    const i = setInterval(tick, 1000);
+    return () => clearInterval(i);
+  }, [incomingCall]);
 
-  const { callerId, callType, channelName, callerName, shop } = incomingCall;
+  if (!incomingCall || !consultantId) return null;
 
-  const handleAccept = async () => {
-    const receiverId = consultantId;
-    if (!receiverId || !callerId) return;
+  const { callId, callType, callerName, callerAvatar } = incomingCall;
+  const isVideo = callType === "video";
+  const total = Math.round((incomingCall.ringTimeoutMs || 30000) / 1000);
 
-    const shopId = getShopId() || localStorage.getItem("wix_id");
-
-    const micState = await checkMicPermission();
-    if (micState === "denied") {
-      alert("Please grant microphone permission to start the call");
-      return;
+  const accept = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await ensureSocketRegistered(consultantId, { role: SOCKET_ROLE.CONSULTANT });
+      const { data } = await axios.post(`${BACKEND}/api/call/accept/${callId}`, { userId: consultantId });
+      if (!data?.success) throw new Error(data?.message || "Could not accept");
+      console.log("[CALL] accepted", callId);
+      dispatch(setIncomingCall(null));
+      navigate(callPagePath(callId, "/consultant-dashboard"));
+    } catch (err) {
+      const code = err.response?.data?.code || "";
+      setError(code ? "This call is no longer available." : err.message);
+      setTimeout(() => dispatch(setIncomingCall(null)), 1500);
+    } finally {
+      setBusy(false);
     }
-
-    const ok = await ensureSocketRegistered(receiverId, {
-      role: SOCKET_ROLE.CONSULTANT,
-    });
-    if (!ok) {
-      alert("Could not connect. Please refresh and try again.");
-      return;
-    }
-
-    const uid = Math.floor(Math.random() * 1000000);
-    const res = await axios.post(
-      `${process.env.REACT_APP_BACKEND_HOST}/api/call/generate-token`,
-      {
-        channelName,
-        uid,
-        callerId,
-        receiverId,
-      },
-      { headers: { "Content-Type": "application/json" } },
-    );
-
-    const data = res.data;
-    if (!data?.token) {
-      alert("Could not start call. Please try again.");
-      return;
-    }
-
-    socket.emit("call-accepted", {
-      callerId,
-      receiverId,
-      channelName,
-      callType: callType || "voice",
-      shopId,
-    });
-
-    dispatch(setIncomingCall(null));
-
-    const returnUrl = `${window.location.origin}/consultant-dashboard`;
-
-    const callUrl = buildCallPageUrl({
-      callerId,
-      receiverId,
-      callType: callType || "voice",
-      uid,
-      channelName,
-      token: data.token,
-      appId: data.appId,
-      userId: receiverId,
-      userType: "consultant",
-      shopId,
-      returnUrl,
-    });
-
-    setTimeout(() => navigateToCallPage(callUrl), 300);
   };
 
-  const handleReject = async () => {
-    const receiverId = consultantId;
-    if (!receiverId) return;
-
-    await ensureSocketRegistered(receiverId, {
-      role: SOCKET_ROLE.CONSULTANT,
-    });
-
-    socket.emit("reject-call", {
-      callerId,
-      receiverId,
-      channelName,
-      callType: callType || "voice",
-    });
-    dispatch(setIncomingCall(null));
-    dispatch(setCallRejected(null));
+  const decline = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await axios.post(`${BACKEND}/api/call/reject/${callId}`, { userId: consultantId });
+    } catch (err) {
+      /* already settled server-side */
+    } finally {
+      dispatch(setIncomingCall(null));
+      setBusy(false);
+    }
   };
 
   return (
     <>
+      <style>{css}</style>
       <TestRingtone incomingCall={incomingCall} />
-      <div
-        style={{
-          position: "fixed",
-          top: "20px",
-          right: "20px",
-          width: "320px",
-          backgroundColor: "#ffffff",
-          boxShadow: "0px 4px 14px rgba(0, 0, 0, 0.15)",
-          borderRadius: "12px",
-          zIndex: 10000,
-          padding: "10px",
-          fontFamily: "Arial, sans-serif",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            marginBottom: "12px",
-          }}
-        >
+      <div className="ic-card" role="dialog" aria-modal="false" aria-label={`Incoming ${isVideo ? "video" : "audio"} call`}>
+        <div className="ic-kicker">
+          <span className="ic-dot" aria-hidden="true" />
+          Incoming {isVideo ? "video" : "audio"} call
+        </div>
+        <div className="ic-who">
           <img
-            src="https://imgs.search.brave.com/8vitWtK7-18taVi4PjQG1jZwM0baiJg4CfpjJVibqtw/rs:fit:860:0:0:0/g:ce/aHR0cHM6Ly9wZnBt/YWtlci5jb20vaW1h/Z2VzL2xhbmRpbmcv/aGVhZHNob3RzL2Js/b2dfMC5qcGc"
-            alt="Caller"
-            style={{
-              width: "60px",
-              height: "60px",
-              borderRadius: "50%",
-              marginRight: "12px",
-              objectFit: "cover",
-            }}
+            className="ic-avatar"
+            src={callerAvatar ? (/^https?:/i.test(callerAvatar) ? callerAvatar : `${BACKEND}/${String(callerAvatar).replace(/\\/g, "/")}`) : DEFAULT_AVATAR}
+            alt=""
+            onError={(e) => { e.currentTarget.src = DEFAULT_AVATAR; }}
           />
           <div>
-            <p
-              style={{
-                margin: 0,
-                fontSize: "15px",
-                fontWeight: "600",
-                color: "#222",
-              }}
-            >
-              {callType} call
-            </p>
-            <p style={{ margin: 0, fontSize: "14px", color: "#555" }}>
-              {callerName} is calling you
-            </p>
+            <div className="ic-name">{callerName || "Client"}</div>
+            <div className="ic-sub">{isVideo ? "Video consultation" : "Audio consultation"}{left != null ? ` · ${left}s` : ""}</div>
           </div>
         </div>
-
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <button
-            type="button"
-            onClick={handleAccept}
-            style={{
-              flex: 1,
-              backgroundColor: "#28a745",
-              color: "#fff",
-              border: "none",
-              borderRadius: "8px",
-              padding: "8px",
-              fontSize: "14px",
-              cursor: "pointer",
-              marginRight: "8px",
-            }}
-          >
-            Accept
-          </button>
-
-          <button
-            type="button"
-            onClick={handleReject}
-            style={{
-              flex: 1,
-              backgroundColor: "#dc3545",
-              color: "#fff",
-              border: "none",
-              borderRadius: "8px",
-              padding: "8px",
-              fontSize: "14px",
-              cursor: "pointer",
-            }}
-          >
-            Reject
-          </button>
+        <div className="ic-actions">
+          <button type="button" className="ic-btn ic-decline" onClick={decline} disabled={busy}>Decline</button>
+          <button type="button" className="ic-btn ic-accept" onClick={accept} disabled={busy}>{busy ? "Connecting…" : "Accept"}</button>
         </div>
+        {error && <div className="ic-err">{error}</div>}
+        {left != null && <div className="ic-bar" aria-hidden="true"><span style={{ width: `${(left / total) * 100}%` }} /></div>}
       </div>
     </>
   );

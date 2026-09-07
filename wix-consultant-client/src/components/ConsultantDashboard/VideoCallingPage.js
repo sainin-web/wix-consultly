@@ -1,1013 +1,389 @@
-import React, { useEffect, useState, useRef } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
-import styles from "./VideoCallingPage.module.css";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
-import {
-  endCall,
-  startCall,
-  toggleMute,
-  toggleVideo,
-} from "../Redux/slices/callSlice";
-import {
-  initRingtone,
-  playRingtone,
-  stopRingtone,
-} from "../ringTone/ringingTune";
-import {
-  getSocket,
-  socket,
-  ensureSocketRegistered,
-  SOCKET_ROLE,
-} from "../Sokect-io/SokectConfig";
 import axios from "axios";
-import { getCustomerId } from "../../utils/wixStorage";
-import profileImageDefault from "../../../src/assets/avatar-or-person-sign-profile-picture-portrait-icon-user-profile-symbol.webp";
+import styles from "./VideoCallingPage.module.css";
+import { joinCall, leaveCall, toggleMute, toggleVideo, getLocalVideoTrack, getRemoteVideoTrack } from "../Redux/slices/callSlice";
+import { clearCallEvent } from "../Redux/slices/sokectSlice";
+import { ensureSocketRegistered, SOCKET_ROLE } from "../Sokect-io/SokectConfig";
+import { initRingtone, playRingtone, stopRingtone } from "../ringTone/ringingTune";
+import { getConsultantId, getCustomerId, isConsultantSession } from "../../utils/wixStorage";
+import { useWixUser } from "../../useContext/WixUserContext";
+import { formatCurrency } from "../Helper/Helper";
+
+/*
+ * In-app call page (/video/calling/page?callId=…). Renders INSIDE the Wix
+ * iframe in a bounded shell; nothing here uses vh or window.top.
+ *
+ * The server owns the lifecycle. This page:
+ *   1. loads the session by callId (DB decides the phase)
+ *   2. joins Agora once the call is accepted and tells the server (joined)
+ *   3. shows "active" only after the server's callConnected (billing start)
+ *   4. ends via the idempotent REST endpoint; the socket callEnded settles UI
+ */
+const BACKEND = process.env.REACT_APP_BACKEND_HOST;
+const DEFAULT_AVATAR = "/images/flag/teamdefault.png";
+const TERMINAL = ["ended", "rejected", "cancelled", "missed", "failed", "notfound"];
+
+const resolveAvatar = (raw) => (!raw ? DEFAULT_AVATAR : /^https?:\/\//i.test(raw) ? raw.replace(/^http:\/\//i, "https://") : `${BACKEND}/${String(raw).replace(/\\/g, "/")}`);
+const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+
+const I = {
+  mic: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>,
+  micOff: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/></svg>,
+  cam: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>,
+  camOff: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"/><line x1="1" y1="1" x2="23" y2="23"/></svg>,
+  end: <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08a.996.996 0 0 1 0-1.41C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.39.39.39 1.02 0 1.41l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28a11.27 11.27 0 0 0-2.67-1.85.996.996 0 0 1-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/></svg>,
+  lock: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>,
+  back: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>,
+};
+
 function VideoCallingPage() {
   const navigate = useNavigate();
-  const location = useLocation();
   const dispatch = useDispatch();
-  const localVideoRef = useRef(null);
-  const remoteVideoRef = useRef(null);
-  const [callerDetails, setCallerDetails] = useState(null);
-  const [callerId, setCallerId] = useState(null);
-  const [callSession, setCallSession] = useState(null);
-  const [callSessionEnded, setCallSessionEnded] = useState(false);
-  const { callEnded } = useSelector((state) => state.socket);
-  const params = new URLSearchParams(window.location.search);
-  const receiverId = params.get("receiverId");
-  const callType = params.get("callType") || "video";
-  const token = params.get("token")
-    ? decodeURIComponent(params.get("token"))
-    : null;
-  const channelNameParam = params.get("channelName");
-  const callerIdParam = params.get("callerId");
-  const uidParam = params.get("uid");
-  const appIdParam = params.get("appId");
-  const userId = params.get("userId");
-  const shopId = params.get("shopId");
-  const userType = params.get("userType");
-  const [callAccepted, setCallAccepted] = useState(null);
-  const callStartedRef = useRef(false);
-  const { inCall, channel, type, muted, videoEnabled } = useSelector(
-    (state) => state.call,
-  );
-  const isVideoCall = callType === "video";
-  const { callRejected } = useSelector((state) => state.socket);
-  const [bothUserJoined, setBothUserJoined] = useState(false);
-  const [time, setTime] = useState({ minutes: 0, seconds: 0 });
-  const intervalRef = useRef(null);
-  const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
-  const [transactionId, setTransactionId] = useState(null);
-  const [firstTime, setFirstTime] = useState(false);
-  const [isRinging, setIsRinging] = useState(false);
-  const [bothUserConnected, setBothUserConnected] = useState(false);
-  const [isCallActive, setIsCallActive] = useState(false);
+  const params = useMemo(() => new URLSearchParams(window.location.search), []);
+  const callId = params.get("callId");
+  const returnTo = params.get("return");
+  const { user } = useWixUser();
+  const isConsultant = isConsultantSession();
+  const me = isConsultant ? getConsultantId() : user?.wixDbId || getCustomerId();
 
-  const [callActive, setCallActive] = useState(true);
+  const media = useSelector((s) => s.call);
+  const { callEvent, callPeer, callEndSummary } = useSelector((s) => s.socket);
 
-  useEffect(() => {
-    const handleBeforeUnload = (e) => {
-      if (callActive) {
-        e.preventDefault();
-        e.returnValue = "";
-      }
-    };
+  const [session, setSession] = useState(null);
+  const [phase, setPhase] = useState("loading"); // loading | ringing | connecting | active | + TERMINAL
+  const [note, setNote] = useState(null); // { text, tone }
+  const [credits, setCredits] = useState(null);
+  const [confirmEnd, setConfirmEnd] = useState(false);
+  const [ending, setEnding] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [summary, setSummary] = useState(null);
+  const localRef = useRef(null);
+  const remoteRef = useRef(null);
+  const joinedRef = useRef(false);
+  const terminalRef = useRef(false);
 
-    window.addEventListener("beforeunload", handleBeforeUnload);
+  const isVideo = session?.callType === "video";
+  const counterpart = session?.participant || session?.counterpart || null;
+  const role = session?.role || (isConsultant ? "consultant" : "user");
+  const currency = ""; // amounts come from the server; the store currency symbol is shown by the parent pages
 
-    // Cleanup important hai
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-    };
-  }, [callActive]);
+  const instanceQ = (() => { const i = params.get("instance"); return i ? `?instance=${encodeURIComponent(i)}` : ""; })();
+  const goBack = useCallback(() => {
+    const fallback = isConsultant ? "/consultant-dashboard" : "/consultant/card";
+    navigate(`${returnTo && returnTo.startsWith("/") ? returnTo : fallback}${instanceQ}`, { replace: true });
+  }, [navigate, returnTo, isConsultant, instanceQ]);
 
-  useEffect(() => {
-    const callAcceptedFromStorage = JSON.parse(
-      localStorage.getItem("callAccepted") || null,
-    );
-    setCallAccepted(callAcceptedFromStorage);
-  }, [userId]);
-  useEffect(() => {
-    const callerIdFromStorage = getCustomerId();
-    const finalCallerId = callerIdParam || callerIdFromStorage;
-    setCallerId(finalCallerId);
-  }, [callerIdParam]);
-
-  // get call session from server
-
-  const getCallSession = async () => {
-    try {
-      const response = await axios.get(
-        `${process.env.REACT_APP_BACKEND_HOST}/api/users/find-call-session`,
-        {
-          params: {
-            userId,
-            channelName: channelNameParam,
-          },
-        },
-      );
-      if (response.status === 200) {
-        setCallSession(response.data.data);
-        localStorage.setItem("callSession", JSON.stringify(response.data.data));
-      }
-    } catch (error) {
-      console.error("Error fetching call session:", error);
-    }
-  };
-  useEffect(() => {
-    getCallSession();
-  }, [callType]);
-
-  useEffect(() => {
-    if (!userId) return;
-    const role =
-      userType === "consultant"
-        ? SOCKET_ROLE.CONSULTANT
-        : SOCKET_ROLE.CUSTOMER;
-    ensureSocketRegistered(userId, { role });
-  }, [userId, userType]);
-
-  useEffect(() => {
-    if (userType === "consultant") {
-      const data = {
-        callerId: callerIdParam,
-        receiverId: receiverId,
-        channelName: channelNameParam,
-        callType,
-      };
-      socket.emit("user-is-on", data);
-    }
-    startTimer(Date.now());
-  }, [userType]);
-
-  useEffect(() => {
-    const socket = getSocket();
-    const handleBothUserJoin = (data) => {
-      setBothUserJoined(true);
-      setCallAccepted(true);
-      startTimer(Date.now());
-    };
-    socket.on("both-user-join", handleBothUserJoin);
-    return () => {
-      socket.off("both-user-join", handleBothUserJoin);
-    };
-  }, []);
-
-  useEffect(() => {
-    const socket = getSocket();
-
-    const handleAutoCallEnd = (data) => {
-      console.log("🔥 autoCallEnded-no-balance received:", data);
-      setCallActive(false);
-      // alert("❌ Balance khatam ho gaya, call end ho gayi");
-      handleEndCall();
-    };
-
-    socket.on("autoCallEnded-no-balance", handleAutoCallEnd);
-
-    return () => {
-      socket.off("autoCallEnded-no-balance", handleAutoCallEnd);
-    };
-  }, []);
-
-  useEffect(() => {
-    const socket = getSocket();
-    const handleBothUpdateTime = (data) => {
-      console.log("🔥 call-accepted-started received:", data);
-      stopRingtone();
-      setIsCallActive(true);
-      const startedAt = data?.startedAt;
-      startTimer(startedAt != null ? startedAt : undefined);
-      localStorage.setItem(
-        "endFromClient",
-        JSON.stringify(data?.transactionId),
-      );
-      localStorage.setItem("shopId", JSON.stringify(data?.shopId));
-      setTransactionId(data?.transactionId);
-      socket.emit("user-connected-time-updated", {
-        callerId: callerIdParam,
-        receiverId: receiverId,
-        channelName: channelNameParam,
-        callType: callType,
-        startedAt: Date.now(),
-        transactionId: data?.transactionId,
-      });
-    };
-    socket.on("call-accepted-started", handleBothUpdateTime);
-
-    return () => {
-      socket.off("call-accepted-started", handleBothUpdateTime);
-    };
-  }, []);
-
-  useEffect(() => {
-    //     if (firstTime && userType === "client") {
-    const handleFirstTime = () => {
-      console.log("firstTime", firstTime);
-
-      const callSession = JSON.parse(localStorage.getItem("callSession"));
-      const transactionId_ = callSession?.transtionId;
-      console.log("callSession", callSession);
-      const socket = getSocket();
-
-      socket.emit("user-connected-time-updated", {
-        callerId: callerIdParam,
-        receiverId: receiverId,
-        channelName: channelNameParam,
-        callType: callType,
-        startedAt: Date.now(),
-        transactionId:
-          localStorage.getItem("endFromClient") ||
-          transactionId ||
-          transactionId_,
-      });
-
-      console.log(
-        "transactionId_____handleFirstTime",
-        localStorage.getItem("endFromClient") ||
-          transactionId ||
-          transactionId_,
-      );
-    };
-    if (firstTime && userType === "client") {
-      handleFirstTime();
-    }
-  }, [firstTime]);
-
-  useEffect(() => {
-    const socket = getSocket();
-    const handleBothUpdateTime = (data) => {
-      console.log("🔥 user-available received:", data);
-      startTimer(Date.now());
-    };
-
-    socket.on("user-available-start-timer", handleBothUpdateTime);
-
-    return () => {
-      socket.off("user-available-start-timer", handleBothUpdateTime);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!callerId || !receiverId || !channelNameParam || !callType) return;
-    const callKey = `call_started_${channelNameParam}`;
-    console.log("callKey", callKey);
-    console.log("effect triggered");
-    if (sessionStorage.getItem(callKey)) return;
-    console.log("calling user");
-    console.log("effect triggered");
-    sessionStorage.setItem(callKey, "true");
-  }, [callerId, receiverId, channelNameParam, callType]);
-
-  useEffect(() => {
-    if (callStartedRef.current) return;
-    if (token && channelNameParam && uidParam) {
-      const appId = appIdParam;
-      callStartedRef.current = true;
-      dispatch(
-        startCall({
-          token: token,
-          channel: channelNameParam,
-          uid: uidParam,
-          appId: appId,
-          callType: callType,
-        }),
-      )
-        .unwrap()
-        .then((result) => {
-          console.log(`${callType} call started successfully:`, result);
-        })
-        .catch((error) => {
-          console.error(`${callType} call failed:`, error);
-        });
-      if (userType === "client") {
-        initRingtone();
-        playRingtone();
-      }
-    }
-  }, [dispatch, token, channelNameParam, uidParam, appIdParam, callType]);
-
-  useEffect(() => {
-    if (isVideoCall) {
-      let isPlaying = false;
-      let attempts = 0;
-      const maxAttempts = 40;
-      const checkAndPlayLocalVideo = () => {
-        if (isPlaying) return;
-
-        import("../Redux/slices/callSlice").then((module) => {
-          const track = module.getLocalVideoTrack();
-          if (track && localVideoRef.current) {
-            try {
-              track
-                .play(localVideoRef.current)
-                .then(() => {
-                  console.log("Local video playing successfully");
-                  isPlaying = true;
-                  attempts = maxAttempts;
-                })
-                .catch((err) => {
-                  console.error("Error playing local video:", err);
-                });
-            } catch (error) {
-              console.error("Error playing local video:", error);
-            }
-          } else {
-            if (attempts < 10) {
-              console.log("Waiting for local video track...", {
-                hasTrack: !!track,
-                hasElement: !!localVideoRef.current,
-                inCall: inCall,
-                type: type,
-              });
-            }
-          }
-        });
-      };
-
-      checkAndPlayLocalVideo();
-      const interval = setInterval(() => {
-        if (!isPlaying) {
-          checkAndPlayLocalVideo();
-        }
-        attempts++;
-        if (attempts >= maxAttempts) {
-          clearInterval(interval);
-        }
-      }, 500);
-
-      return () => {
-        clearInterval(interval);
-        isPlaying = false;
-      };
-    }
-  }, [isVideoCall, inCall, type]);
-
-  useEffect(() => {
-    if (isVideoCall && inCall) {
-      let attempts = 0;
-      const maxAttempts = 20;
-
-      const checkAndPlayRemoteVideo = () => {
-        if (!remoteVideoRef.current) {
-          attempts++;
-          if (attempts < maxAttempts) {
-            return;
-          }
-        }
-
-        import("../Redux/slices/callSlice").then((module) => {
-          const track = module.getRemoteVideoTrack();
-          if (track && remoteVideoRef.current) {
-            try {
-              track.play(remoteVideoRef.current);
-              console.log("Remote video playing on element");
-              attempts = maxAttempts;
-            } catch (error) {
-              console.error("Error playing remote video:", error);
-            }
-          }
-        });
-      };
-
-      checkAndPlayRemoteVideo();
-      const interval = setInterval(() => {
-        checkAndPlayRemoteVideo();
-        attempts++;
-        if (attempts >= maxAttempts) {
-          clearInterval(interval);
-        }
-      }, 500);
-
-      return () => clearInterval(interval);
-    }
-  }, [isVideoCall, inCall]);
-
-  useEffect(() => {
-    const handleRemoteVideoReady = () => {
-      setHasRemoteVideo(true);
-      if (remoteVideoRef.current) {
-        import("../Redux/slices/callSlice").then((module) => {
-          const track = module.getRemoteVideoTrack();
-          if (track) {
-            track
-              .play(remoteVideoRef.current)
-              .then(() => {
-                console.log("Remote video played via event");
-              })
-              .catch((err) => {
-                console.error("Error playing remote video via event:", err);
-              });
-          }
-        });
-      }
-    };
-
-    const handleRemoteVideoStopped = () => {
-      setHasRemoteVideo(false);
-    };
-
-    const handleLocalVideoReady = () => {
-      console.log("Local video ready event received");
-      const tryPlayLocalVideo = () => {
-        if (localVideoRef.current) {
-          import("../Redux/slices/callSlice").then((module) => {
-            const track = module.getLocalVideoTrack();
-            if (track) {
-              track
-                .play(localVideoRef.current)
-                .then(() => {
-                  console.log("Local video played via event successfully");
-                })
-                .catch((err) => {
-                  console.error("Error playing local video via event:", err);
-                  setTimeout(tryPlayLocalVideo, 500);
-                });
-            } else {
-              console.log("Local video track not available, retrying...");
-              setTimeout(tryPlayLocalVideo, 500);
-            }
-          });
-        } else {
-          console.log("Local video element not ready, retrying...");
-          setTimeout(tryPlayLocalVideo, 500);
-        }
-      };
-      tryPlayLocalVideo();
-    };
-
-    window.addEventListener("remote-video-ready", handleRemoteVideoReady);
-    window.addEventListener("remote-video-stopped", handleRemoteVideoStopped);
-    window.addEventListener("local-video-ready", handleLocalVideoReady);
-
-    return () => {
-      window.removeEventListener("remote-video-ready", handleRemoteVideoReady);
-      window.removeEventListener(
-        "remote-video-stopped",
-        handleRemoteVideoStopped,
-      );
-      window.removeEventListener("local-video-ready", handleLocalVideoReady);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (isVideoCall && videoEnabled && localVideoRef.current) {
-      import("../Redux/slices/callSlice").then((module) => {
-        const track = module.getLocalVideoTrack();
-        if (track) {
-          track
-            .play(localVideoRef.current)
-            .then(() => {
-              console.log("Local video playing after camera turned on");
-            })
-            .catch((err) =>
-              console.error("Error playing local video after enable:", err),
-            );
-        }
-      });
-    }
-  }, [isVideoCall, videoEnabled]);
-
-  useEffect(() => {
-    if (!inCall) setHasRemoteVideo(false);
-  }, [inCall]);
-
-  const getCallingUser = async () => {
-    const finalCallerId = callerIdParam || callerId;
-    if (!finalCallerId || !receiverId) return;
-    try {
-      const url = `${process.env.REACT_APP_BACKEND_HOST}/api/call/get-caller-receiver-details/${finalCallerId}/${receiverId}`;
-      const res = await fetch(url, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
-      const data = await res.json();
-      if (data?.success) {
-        setCallerDetails(data?.payload);
-      }
-    } catch (error) {
-      console.error("Failed to fetch caller details:", error);
-    }
-  };
-
-  useEffect(() => {
-    getCallingUser();
-  }, [callerIdParam, callerId, receiverId]);
-
-  const getProfileImageUrl = () => {
-    const imagePath =
-      userType === "client"
-        ? callerDetails?.receiver?.profileImage
-        : callerDetails?.caller?.profileImage;
-
-    if (imagePath) {
-      return `${process.env.REACT_APP_BACKEND_HOST}/${imagePath.replace("\\", "/")}`;
-    }
-    return profileImageDefault;
-  };
-
-  const stopTimer = () => {
-    clearInterval(intervalRef.current);
-    intervalRef.current = null;
-    localStorage.removeItem("callStartTime");
-    setTime({ minutes: 0, seconds: 0 });
-  };
-
-  const endCallFromRemote = (reason) => {
-    console.log("[call] remote end:", reason);
+  const finish = useCallback((next, extra = {}) => {
+    if (terminalRef.current) return;
+    terminalRef.current = true;
     stopRingtone();
-    stopTimer();
-    setCallActive(false);
-    dispatch(endCall());
-    setCallSessionEnded(true);
-    localStorage.removeItem("callStartTime");
-    localStorage.removeItem("endFromClient");
-    localStorage.removeItem("callAccepted");
-    const returnUrl = params.get("returnUrl");
-    if (returnUrl) {
+    dispatch(leaveCall());
+    setPhase(next);
+    if (extra.summary) setSummary(extra.summary);
+    if (extra.note) setNote(extra.note);
+  }, [dispatch]);
+
+  /* ── 1. load session (DB decides) ──────────────────────────── */
+  const loadSession = useCallback(async () => {
+    if (!me || !callId) return null;
+    const { data } = await axios.get(`${BACKEND}/api/call/active-session/${me}`);
+    if (!data?.hasActiveCall || String(data.call?.callId) !== String(callId)) return null;
+    return data.call;
+  }, [me, callId]);
+
+  useEffect(() => {
+    if (!me) return;
+    let cancelled = false;
+    (async () => {
       try {
-        navigate(-1);
-      } catch {
-        window.history.back();
+        await ensureSocketRegistered(me, { role: isConsultant ? SOCKET_ROLE.CONSULTANT : SOCKET_ROLE.CUSTOMER });
+        const s = await loadSession();
+        if (cancelled) return;
+        if (!s) {
+          finish("notfound", { note: { text: "This call is no longer active.", tone: "muted" } });
+          return;
+        }
+        setSession(s);
+        console.log("[CALL] page loaded", { callId, status: s.status, role: s.role });
+        if (s.status === "ringing") {
+          setPhase("ringing");
+          if (s.role === "user") { initRingtone(); playRingtone(); }
+        } else {
+          setPhase(s.status === "active" ? "active" : "connecting");
+        }
+      } catch (err) {
+        if (!cancelled) finish("failed", { note: { text: "Unable to load the call. Please check your connection and try again.", tone: "danger" } });
       }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me]);
+
+  /* ── 2. join Agora once accepted (or when resuming) ────────── */
+  const fetchToken = useCallback(async () => {
+    const { data } = await axios.post(`${BACKEND}/api/call/token/${callId}`, { userId: me });
+    if (!data?.success || !data.token) throw new Error(data?.message || "token");
+    return data;
+  }, [callId, me]);
+
+  const join = useCallback(async () => {
+    if (joinedRef.current || !session) return;
+    joinedRef.current = true;
+    try {
+      const t = await fetchToken();
+      const r = await dispatch(joinCall({
+        appId: t.appId, channel: t.channelName, token: t.token, uid: t.uid, callType: session.callType,
+        renewToken: async () => (await fetchToken()).token,
+      }));
+      if (joinCall.rejected.match(r)) {
+        joinedRef.current = false;
+        setPhase("failed");
+        setNote({ text: r.payload?.message || "Unable to connect the call.", tone: "danger" });
+        return;
+      }
+      await axios.post(`${BACKEND}/api/call/joined/${callId}`, { userId: me });
+      console.log("[CALL] joined + reported to server", callId);
+    } catch (err) {
+      joinedRef.current = false;
+      const code = err.response?.data?.code || "";
+      if (code.startsWith("call_")) { finish("notfound", { note: { text: "This call is no longer active.", tone: "muted" } }); return; }
+      setPhase("failed");
+      setNote({ text: "Unable to connect the call. Please check your internet connection and try again.", tone: "danger" });
+    }
+  }, [session, dispatch, fetchToken, callId, me, finish]);
+
+  useEffect(() => {
+    if ((phase === "connecting" || phase === "active") && !joinedRef.current) join();
+  }, [phase, join]);
+
+  /* ── 3. server lifecycle events ────────────────────────────── */
+  useEffect(() => {
+    if (!callEvent || String(callEvent.payload?.callId) !== String(callId)) return;
+    const { type, payload } = callEvent;
+    console.log("[CALL] event", type);
+    if (type === "accepted") { stopRingtone(); setSession((s) => ({ ...(s || {}), ...payload, participant: s?.participant || payload.counterpart })); setPhase("connecting"); }
+    else if (type === "connected") { setSession((s) => ({ ...(s || {}), ...payload, participant: s?.participant })); setPhase("active"); }
+    else if (type === "ended") finish("ended", { summary: payload });
+    else if (type === "rejected") finish("rejected", { note: { text: "The consultant declined the call.", tone: "muted" } });
+    else if (type === "cancelled") finish("cancelled", { note: { text: role === "user" ? "Call cancelled." : "The client cancelled the call.", tone: "muted" } });
+    else if (type === "missed") finish("missed", { note: { text: role === "user" ? "The consultant did not answer." : "Missed call.", tone: "muted" } });
+    else if (type === "failed") finish("failed", { note: { text: "The call could not be connected.", tone: "danger" } });
+    else if (type === "creditsWarning") setCredits(payload.secondsRemaining);
+    else if (type === "creditsExhausted") setCredits(0);
+    dispatch(clearCallEvent());
+  }, [callEvent, callId, finish, role, dispatch]);
+
+  useEffect(() => {
+    if (callEndSummary && String(callEndSummary.callId) === String(callId) && !terminalRef.current) finish("ended", { summary: callEndSummary });
+  }, [callEndSummary, callId, finish]);
+
+  /* ── 4. timer from the server's startedAt ──────────────────── */
+  useEffect(() => {
+    if (phase !== "active" || !session?.startedAt) return;
+    const start = new Date(session.startedAt).getTime();
+    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - start) / 1000)));
+    tick();
+    const i = setInterval(tick, 1000);
+    return () => clearInterval(i);
+  }, [phase, session?.startedAt]);
+
+  /* ── 5. media rendering ────────────────────────────────────── */
+  useEffect(() => {
+    if (!media.hasLocalVideo || !media.videoEnabled || !localRef.current) return;
+    try { getLocalVideoTrack()?.play(localRef.current, { fit: "cover" }); } catch (e) { /* ignore */ }
+  }, [media.hasLocalVideo, media.videoEnabled, media.phase]);
+
+  useEffect(() => {
+    if (!media.remoteVideoOn || !remoteRef.current) return;
+    try { getRemoteVideoTrack()?.play(remoteRef.current, { fit: "cover" }); } catch (e) { /* ignore */ }
+  }, [media.remoteVideoOn]);
+
+  /* ── 6. connection banners ─────────────────────────────────── */
+  useEffect(() => {
+    if (phase !== "active" && phase !== "connecting") return;
+    if (media.agoraState === "RECONNECTING") { setNote({ text: "Reconnecting… trying to restore your connection. The call ends automatically if it cannot be restored.", tone: "warn" }); return; }
+    if (callPeer && String(callPeer.callId) === String(callId)) {
+      if (callPeer.connected) { setNote({ text: "Connection restored", tone: "ok" }); const t = setTimeout(() => setNote(null), 3000); return () => clearTimeout(t); }
+      const total = Math.round((callPeer.graceMs || 20000) / 1000);
+      const tick = () => {
+        const left = Math.max(0, total - Math.floor((Date.now() - callPeer.since) / 1000));
+        setNote({ text: `${role === "user" ? "Consultant" : "Client"} connection lost · waiting to reconnect (${left}s)`, tone: "warn" });
+      };
+      tick();
+      const i = setInterval(tick, 1000);
+      return () => clearInterval(i);
+    }
+    setNote(null);
+  }, [media.agoraState, callPeer, callId, phase, role]);
+
+  /* ── 7. actions ────────────────────────────────────────────── */
+  const endNow = async () => {
+    if (ending) return;
+    setEnding(true);
+    setConfirmEnd(false);
+    try {
+      await axios.post(`${BACKEND}/api/call/end-session/${callId}`, { userId: me });
+      console.log("[CALL] end requested", callId);
+    } catch (err) {
+      console.warn("[CALL ERROR] end failed:", err.response?.data?.message || err.message);
+      // The session may already be over: settle locally.
+      finish("ended");
     }
   };
-
-  useEffect(() => {
-    if (callRejected) {
-      endCallFromRemote("rejected");
-    }
-  }, [callRejected]);
-
-  useEffect(() => {
-    if (callEnded) {
-      endCallFromRemote(callEnded?.reason || "ended");
-    }
-  }, [callEnded]);
-
-  useEffect(() => {
-    const sock = getSocket();
-    const onCallEndedSocket = () => endCallFromRemote("callEnded-socket");
-    const onRejectedSocket = () => endCallFromRemote("rejected-socket");
-    const onMissed = () => endCallFromRemote("missed");
-    const onReceiverOffline = () => {
-      stopRingtone();
-      if (userType === "client") {
-        alert("Consultant is not available right now.");
-      }
-      endCallFromRemote("receiver-offline");
-    };
-
-    sock.on("callEnded", onCallEndedSocket);
-    sock.on("call-ended-rejected", onRejectedSocket);
-    sock.on("call-missed", onMissed);
-    sock.on("call-receiver-offline", onReceiverOffline);
-
-    return () => {
-      sock.off("callEnded", onCallEndedSocket);
-      sock.off("call-ended-rejected", onRejectedSocket);
-      sock.off("call-missed", onMissed);
-      sock.off("call-receiver-offline", onReceiverOffline);
-    };
-  }, [userType]);
-
-  const handleEndCall = () => {
-    setCallActive(false);
-    const endFromClient = localStorage.getItem("endFromClient") || null;
-    const shopIdLocalRaw = localStorage.getItem("shopId");
-    const shopIdLocal = shopIdLocalRaw
-      ? shopIdLocalRaw.replace(/"/g, "")
-      : null;
-    if (endFromClient) {
-      stopTimer();
-      dispatch(endCall());
-      setCallSessionEnded(true);
-      localStorage.removeItem("callStartTime");
-      setTimeout(() => {
-        socket.emit("call-ended", {
-          callerId: callerIdParam,
-          receiverId: receiverId,
-          channelName: channelNameParam,
-          callType: callType,
-          transactionId: endFromClient,
-          shopId: shopIdLocal,
-          endby: "user_cut_call",
-        });
-      }, 1000);
-
-      localStorage.removeItem("endFromClient");
-      localStorage.removeItem("callAccepted");
-      localStorage.removeItem("shopId");
-      const returnUrl = params.get("returnUrl");
-      if (returnUrl) {
-        navigate(-1);
-        // window.top.location.href = decodeURIComponent(returnUrl);
-      }
-    } else if (callSession) {
-      dispatch(endCall());
-      stopTimer();
-      setCallSessionEnded(true);
-
-      setTimeout(() => {
-        socket.emit("call-ended", {
-          callerId: callSession?.callerId,
-          receiverId: receiverId,
-          channelName: channelNameParam,
-          callType: callSession?.callType,
-          shopId: callSession.shopId,
-          dtn_: "CUT FROM CONSULTANT SIDE",
-          endby: "consultant_cut_call",
-        });
-
-        console.log("⏱️ call-ended emitted after 1 second (CONSULTANT)");
-      }, 500);
-
-      localStorage.removeItem("callStartTime");
-      localStorage.removeItem("endFromClient");
-
-      const returnUrl = params.get("returnUrl");
-      if (returnUrl) {
-        navigate(-1);
-        // window.top.location.href = decodeURIComponent(returnUrl);
-      }
-    } else {
-      dispatch(endCall());
-      localStorage.removeItem("callStartTime");
-      localStorage.removeItem("endFromClient");
-      const returnUrl = params.get("returnUrl");
-      if (returnUrl) {
-        navigate(-1);
-        // window.top.location.href = decodeURIComponent(returnUrl);
-      } else {
-        navigate(-1);
-      }
-      return;
-    }
+  const cancelNow = async () => {
+    setEnding(true);
+    try { await axios.post(`${BACKEND}/api/call/cancel/${callId}`, { userId: me }); } catch (e) { /* settled */ }
+    finish("cancelled", { note: { text: "Call cancelled.", tone: "muted" } });
+  };
+  const retry = () => { setNote(null); setPhase("connecting"); joinedRef.current = false; };
+  const abandon = async () => {
+    try { await axios.post(`${BACKEND}/api/call/failed/${callId}`, { userId: me }); } catch (e) { /* ignore */ }
+    goBack();
   };
 
-  const handleMuteToggle = () => {
-    dispatch(toggleMute());
-  };
+  // Leave media on unmount; never end the session here (refresh → server grace / resume).
+  useEffect(() => () => { stopRingtone(); dispatch(leaveCall()); }, [dispatch]);
 
-  const handleVideoToggle = () => {
-    if (isVideoCall) {
-      dispatch(toggleVideo());
-    }
-  };
-  useEffect(() => {
-    const onRemoteLeft = (e) => {
-      console.log("🔥 Remote user left — ending call immediately", e?.detail);
-      setCallActive(false);
-      handleEndCall();
-    };
-
-    window.addEventListener("remote-user-left", onRemoteLeft);
-    return () => {
-      window.removeEventListener("remote-user-left", onRemoteLeft);
-    };
-  }, []);
-
-  const startTimer = (optionalStartTimestamp) => {
-    let startTime =
-      optionalStartTimestamp != null
-        ? Number(optionalStartTimestamp)
-        : parseInt(localStorage.getItem("callStartTime"), 10);
-    if (!startTime || isNaN(startTime)) {
-      startTime = Date.now();
-    }
-    localStorage.setItem("callStartTime", String(startTime));
-
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-
-    const tick = () => {
-      const now = Date.now();
-      const diff = Math.floor((now - startTime) / 1000);
-      setTime({
-        minutes: Math.floor(diff / 60),
-        seconds: diff % 60,
-      });
-    };
-    tick(); // update immediately
-    intervalRef.current = setInterval(tick, 1000);
-  };
-  // Consultant/receiver timer starts only when we get synced startedAt via socket (call-accepted-started or both-user-join)
-
-  useEffect(() => {
-    const timerHandler = (event) => {
-      const eventTimestamp = event.detail?.startedAt || Date.now();
-      console.log(
-        "🔥 Call timer start event received - starting timer:",
-        eventTimestamp,
-      );
-      startTimer(eventTimestamp);
-      setIsCallActive(true);
-
-      if (userType === "client") {
-        getSocket().emit("both-update-time", {
-          callerId: callerIdParam,
-          receiverId: receiverId,
-          channelName: channelNameParam,
-          callType: callType,
-          startedAt: eventTimestamp,
-        });
-      }
-      setFirstTime(true);
-      setBothUserConnected(true);
-    };
-
-    const connectedHandler = (event) => {
-      const eventTimestamp = event.detail?.at || Date.now();
-      console.log(
-        "🔥 Call connected event received - starting timer:",
-        eventTimestamp,
-      );
-      startTimer(eventTimestamp);
-      if (userType === "client") {
-        getSocket().emit("both-update-time", {
-          callerId: callerIdParam,
-          receiverId: receiverId,
-          channelName: channelNameParam,
-          callType: callType,
-          startedAt: eventTimestamp,
-        });
-      }
-      setIsRinging(false);
-    };
-
-    window.addEventListener("call-timer-start", timerHandler);
-    window.addEventListener("call-connected", connectedHandler);
-
-    if (window.callAlreadyConnected) {
-      const storedStartTime = localStorage.getItem("callStartTime");
-      if (storedStartTime) {
-        startTimer(parseInt(storedStartTime, 10));
-      } else {
-        startTimer();
-      }
-    }
-
-    return () => {
-      window.removeEventListener("call-timer-start", timerHandler);
-      window.removeEventListener("call-connected", connectedHandler);
-    };
-  }, [userType, callerIdParam, receiverId, channelNameParam, callType]);
-
-  useEffect(() => {
-    if (userType === "client" && !bothUserConnected) {
-      initRingtone();
-      playRingtone();
-      setIsRinging(true);
-    }
-  }, [userType, bothUserConnected]);
-
-  useEffect(() => {
-    if (userType === "client" && bothUserConnected) {
-      stopRingtone();
-    }
-  }, [userType, bothUserConnected]);
+  /* ── render ────────────────────────────────────────────────── */
+  const name = counterpart?.fullname || (role === "user" ? "Consultant" : "Client");
+  const avatar = resolveAvatar(counterpart?.profileImage);
+  const terminal = TERMINAL.includes(phase);
+  const statusText =
+    phase === "loading" ? "Loading…" :
+    phase === "ringing" ? "Ringing…" :
+    phase === "connecting" ? (media.phase === "joined" ? "Waiting for the other participant…" : "Connecting…") :
+    phase === "active" ? "Connected" : "";
 
   return (
-    <div className={styles.videoCallContainer}>
-      <div className={styles.callHeader}>
-        <div className={styles.callHeaderLeft}>
-          <button
-            className={styles.backButton}
-            onClick={handleEndCall}
-            aria-label="End call"
-          >
-            <svg
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-            >
-              <path d="M19 12H5M12 19l-7-7 7-7" />
-            </svg>
-          </button>
-          <div className={styles.callInfo}>
-            <div className={styles.callAvatar}>
-              <img
-                className={styles.callAvatar}
-                src={getProfileImageUrl()}
-                alt="profile"
-              />
-            </div>
-            <div>
-              <div className={styles.callName}>
-                {userType === "client"
-                  ? callerDetails?.receiver?.fullname
-                  : callerDetails?.caller?.fullname}
+    <div className={styles.page}>
+      <div className={`${styles.shell} ${isVideo ? styles.shellVideo : ""}`}>
+        {/* Header */}
+        <div className={styles.head}>
+          <div className={styles.headLeft}>
+            {terminal && <button type="button" className={styles.iconBtn} onClick={goBack} aria-label="Back">{I.back}</button>}
+            <img src={avatar} alt="" className={styles.headAvatar} onError={(e) => { e.currentTarget.src = DEFAULT_AVATAR; }} />
+            <div className={styles.headText}>
+              <div className={styles.headName}>{name}</div>
+              <div className={styles.headSub}>
+                {isVideo ? "Video consultation" : "Audio consultation"}
+                {!terminal && statusText ? ` · ${statusText}` : ""}
               </div>
-              <div className={styles.callStatus}></div>
             </div>
+          </div>
+          <div className={styles.headRight}>
+            <span className={styles.secure} title="Encrypted media">{I.lock}<span>Secure</span></span>
+            {phase === "active" && <span className={styles.timer}>{mmss(elapsed)}</span>}
           </div>
         </div>
 
-        {bothUserConnected && (
-          <div className={styles.callHeaderRight}>
-            <div className={styles.callTimer}>
-              {String(time.minutes).padStart(2, "0")}:
-              {String(time.seconds).padStart(2, "0")}
-            </div>
+        {/* Banners */}
+        {note && !terminal && <div className={`${styles.banner} ${styles[`banner_${note.tone}`] || ""}`} role="status">{note.text}</div>}
+        {media.mediaWarning && phase === "active" && <div className={`${styles.banner} ${styles.banner_warn}`}>{media.mediaWarning.message}</div>}
+        {credits != null && phase === "active" && (
+          <div className={`${styles.banner} ${credits <= 10 ? styles.banner_danger : styles.banner_warn}`} role="alert">
+            {credits > 0 ? `${credits} seconds of credits remaining` : "Credits exhausted — ending call"}
           </div>
         )}
-      </div>
 
-      <div className={styles.videoArea}>
-        <div className={styles.remoteVideo}>
-          {isVideoCall ? (
+        {/* Stage */}
+        <div className={styles.stage}>
+          {isVideo && !terminal ? (
             <>
-              <div
-                ref={remoteVideoRef}
-                data-remote-video
-                className={styles.videoElement}
-                style={{ display: hasRemoteVideo ? "block" : "none" }}
-              />
-              {(!inCall || (inCall && !hasRemoteVideo)) && (
-                <div className={styles.videoPlaceholder}>
-                  <div className={styles.avatarLarge}>
-                    <img
-                      className={styles.avatarLarge}
-                      src={getProfileImageUrl()}
-                      alt="profile"
-                    />
+              <div className={styles.remote}>
+                <div ref={remoteRef} className={styles.video} style={{ display: media.remoteVideoOn ? "block" : "none" }} />
+                {!media.remoteVideoOn && (
+                  <div className={styles.placeholder}>
+                    <img src={avatar} alt="" className={styles.bigAvatar} onError={(e) => { e.currentTarget.src = DEFAULT_AVATAR; }} />
+                    <div className={styles.phName}>{name}</div>
+                    <div className={styles.phSub}>{phase === "active" ? (media.remoteJoined ? "Camera is turned off" : "Reconnecting…") : statusText}</div>
                   </div>
-                  <p className={styles.videoPlaceholderText}>
-                    {!inCall
-                      ? userType === "client"
-                        ? callerDetails?.receiver?.fullname
-                        : callerDetails?.caller?.fullname ||
-                          "Waiting for video..."
-                      : (userType === "client"
-                          ? callerDetails?.receiver?.fullname
-                          : callerDetails?.caller?.fullname) + " (Camera off)"}
-                  </p>
-                </div>
-              )}
+                )}
+                {phase === "active" && media.remoteJoined && !media.remoteAudioOn && <span className={styles.remoteMuted}>{I.micOff} Muted</span>}
+              </div>
+              <div className={styles.local}>
+                <div ref={localRef} className={styles.video} style={{ display: media.hasLocalVideo && media.videoEnabled ? "block" : "none" }} />
+                {!(media.hasLocalVideo && media.videoEnabled) && <div className={styles.localOff}><span>You</span><small>Camera off</small></div>}
+              </div>
             </>
           ) : (
-            <div className={styles.videoPlaceholder}>
-              <div className={styles.avatarLarge}>
-                <img
-                  className={styles.avatarLarge}
-                  src={getProfileImageUrl()}
-                  alt="profile"
-                />
+            <div className={styles.audioStage}>
+              <div className={`${styles.ring} ${phase === "ringing" || phase === "connecting" ? styles.ringPulse : ""}`}>
+                <img src={avatar} alt="" className={styles.bigAvatar} onError={(e) => { e.currentTarget.src = DEFAULT_AVATAR; }} />
               </div>
-              <p className={styles.videoPlaceholderText}>
-                {userType === "client"
-                  ? callerDetails?.receiver?.fullname
-                  : callerDetails?.caller?.fullname || "Calling..."}
-              </p>
+              <div className={styles.phName}>{name}</div>
+              {!terminal && (
+                <div className={`${styles.status} ${phase === "active" ? styles.statusOk : ""}`}>
+                  {phase === "active" && <span className={styles.dot} />}
+                  {statusText}
+                </div>
+              )}
+              {phase === "active" && <div className={styles.bigTimer}>{mmss(elapsed)}</div>}
+              {phase === "active" && media.remoteJoined && !media.remoteAudioOn && <div className={styles.phSub}>{name} is muted</div>}
 
-              {callRejected || callSessionEnded ? (
-                <p
-                  className={styles.videoPlaceholderText}
-                  style={{ color: "red" }}
-                >
-                  {callSessionEnded ? "Call Ended" : "Call Rejected"}
-                </p>
-              ) : (
-                <>
-                  <p
-                    style={{ color: isRinging ? "white" : "green" }}
-                    className={styles.videoPlaceholderText}
-                  >
-                    {isRinging ? "Ringing..." : "Connected..."}
-                  </p>
-                  <p style={{ fontSize: "12px", color: "white" }}>
-                    {callType === "voice" ? "Voice Call" : "Video Call"}
-                  </p>
-                </>
+              {terminal && (
+                <div className={styles.summary}>
+                  <div className={styles.summaryTitle}>
+                    {phase === "ended" ? "Call ended" : phase === "rejected" ? "Call declined" : phase === "cancelled" ? "Call cancelled" : phase === "missed" ? "No answer" : phase === "failed" ? "Call failed" : "Call unavailable"}
+                  </div>
+                  {note?.text && phase !== "ended" && <div className={styles.summaryText}>{note.text}</div>}
+                  {phase === "ended" && summary && (
+                    <dl className={styles.summaryGrid}>
+                      <div><dt>Type</dt><dd>{isVideo ? "Video consultation" : "Audio consultation"}</dd></div>
+                      <div><dt>Duration</dt><dd>{mmss(summary.durationSeconds || 0)}</dd></div>
+                      {role === "user" && <div><dt>Amount charged</dt><dd>{formatCurrency(currency, summary.finalAmount)}</dd></div>}
+                      {role === "user" && summary.remainingBalance != null && <div><dt>Remaining balance</dt><dd>{formatCurrency(currency, summary.remainingBalance)}</dd></div>}
+                      {role === "consultant" && <div><dt>Your earnings</dt><dd>{formatCurrency(currency, summary.consultantShare)}</dd></div>}
+                      {summary.endReason && summary.endReason !== "ended" && <div><dt>Reason</dt><dd>{String(summary.endReason).replace(/_/g, " ")}</dd></div>}
+                    </dl>
+                  )}
+                  {phase === "ended" && !summary && <div className={styles.summaryText}>The session has been closed.</div>}
+                  <div className={styles.summaryActions}>
+                    {phase === "failed" && !terminalRef.current && <button type="button" className={styles.btn} onClick={retry}>Try again</button>}
+                    {phase === "failed" && <button type="button" className={styles.btnGhost} onClick={abandon}>Close</button>}
+                    {phase !== "failed" && <button type="button" className={styles.btn} onClick={goBack}>{isConsultant ? "Back to dashboard" : "Back"}</button>}
+                  </div>
+                </div>
               )}
             </div>
           )}
         </div>
 
-        {isVideoCall && (
-          <div className={styles.localVideo}>
-            <div
-              ref={localVideoRef}
-              data-local-video
-              className={styles.videoElement}
-              style={{
-                display: videoEnabled ? "block" : "none",
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-              }}
-            />
-            <div
-              className={styles.videoPlaceholderSmall}
-              style={{ display: !videoEnabled ? "flex" : "none" }}
-            >
-              <div className={styles.avatarSmall}>You</div>
-              <p className={styles.videoPlaceholderTextSmall}>Camera Off</p>
+        {/* Controls */}
+        {!terminal && (
+          <div className={styles.controls}>
+            {phase === "ringing" ? (
+              <button type="button" className={styles.endBtn} onClick={cancelNow} disabled={ending}>{I.end}<span>{ending ? "Cancelling…" : "Cancel"}</span></button>
+            ) : (
+              <>
+                <button type="button" className={`${styles.ctl} ${media.muted ? styles.ctlOff : ""}`} onClick={() => dispatch(toggleMute())} disabled={media.phase !== "joined"} aria-pressed={media.muted} title={media.muted ? "Unmute" : "Mute"}>
+                  {media.muted ? I.micOff : I.mic}<span>{media.muted ? "Unmute" : "Mute"}</span>
+                </button>
+                {isVideo && (
+                  <button type="button" className={`${styles.ctl} ${!media.videoEnabled ? styles.ctlOff : ""}`} onClick={() => dispatch(toggleVideo())} disabled={!media.hasLocalVideo} aria-pressed={!media.videoEnabled} title={media.videoEnabled ? "Turn camera off" : "Turn camera on"}>
+                    {media.videoEnabled ? I.cam : I.camOff}<span>{media.videoEnabled ? "Camera" : "Camera off"}</span>
+                  </button>
+                )}
+                <button type="button" className={styles.endBtn} onClick={() => setConfirmEnd(true)} disabled={ending}>{I.end}<span>{ending ? "Ending…" : "End call"}</span></button>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* End confirmation */}
+        {confirmEnd && (
+          <div className={styles.overlay} role="dialog" aria-modal="true" aria-labelledby="end-title">
+            <div className={styles.modal}>
+              <h3 id="end-title" className={styles.modalTitle}>End call?</h3>
+              <p className={styles.modalText}>{role === "user" ? "Your final charges will be calculated from the connected time." : "This will end the consultation and finalize billing."}</p>
+              <div className={styles.modalActions}>
+                <button type="button" className={styles.btnGhost} onClick={() => setConfirmEnd(false)}>Cancel</button>
+                <button type="button" className={styles.btnDanger} onClick={endNow}>End call</button>
+              </div>
             </div>
           </div>
         )}
-      </div>
-
-      <div className={styles.callControls}>
-        <button
-          className={`${styles.controlButton} ${muted ? styles.controlButtonActive : ""}`}
-          title={muted ? "Unmute" : "Mute"}
-          onClick={handleMuteToggle}
-        >
-          {muted ? (
-            <svg
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-              <line x1="1" y1="1" x2="23" y2="23" />
-            </svg>
-          ) : (
-            <svg
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-            </svg>
-          )}
-        </button>
-        {isVideoCall && (
-          <button
-            className={`${styles.controlButton} ${!videoEnabled ? styles.controlButtonActive : ""}`}
-            title={videoEnabled ? "Turn Off Camera" : "Turn On Camera"}
-            onClick={handleVideoToggle}
-          >
-            {!videoEnabled ? (
-              <svg
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M23 7l-7 5 7 5V7z" />
-                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-                <line x1="1" y1="1" x2="23" y2="23" />
-              </svg>
-            ) : (
-              <svg
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M23 7l-7 5 7 5V7z" />
-                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-              </svg>
-            )}
-          </button>
-        )}
-        <button
-          className={`${styles.controlButton} ${styles.endCallButton}`}
-          onClick={handleEndCall}
-          title="End Call"
-        >
-          <svg
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-          </svg>
-        </button>
       </div>
     </div>
   );

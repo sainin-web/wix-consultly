@@ -14,6 +14,7 @@ import ConsultantProfileModal from "./ConsultantProfileModal";
 import axios from "axios";
 import DashboardTopNav, { NAV_ICONS } from "./DashboardTopNav";
 import { markAllNotificationsRead, dismissNotificationsFrom } from "../Redux/slices/sokectSlice";
+import { callPagePath } from "../middle-ware/OpenCallingPage";
 
 const isWixEmbed = () =>
   typeof window !== "undefined" && window.self !== window.top;
@@ -116,6 +117,24 @@ function TabNavigation({ children }) {
   useEffect(() => {
     if (!userId) return;
     ensureSocketRegistered(userId, { role: SOCKET_ROLE.CONSULTANT });
+  }, [userId]);
+
+  // Refresh during a live call → the server still has it → go straight back in.
+  useEffect(() => {
+    if (!userId || location.pathname.startsWith("/video/calling")) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await axios.get(`${process.env.REACT_APP_BACKEND_HOST}/api/call/active-session/${userId}`);
+        if (cancelled || !data?.hasActiveCall) return;
+        if (["accepted", "connecting", "active"].includes(data.call?.status)) {
+          console.log("[CALL] consultant refresh → resuming call", data.call.callId);
+          navigate(callPagePath(data.call.callId, "/consultant-dashboard"), { replace: true });
+        }
+      } catch (err) { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
   useEffect(() => {

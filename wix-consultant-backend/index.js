@@ -6,6 +6,16 @@ const cookieParser = require("cookie-parser");
 const { connectDB } = require("./Utils/db");
 const { corsOptions } = require("./config/corsConfig");
 dotenv.config();
+
+// Fail fast on missing critical configuration (billing + realtime depend on these).
+const REQUIRED_ENV = ["MONGO_DB_URL", "MVC_BACKEND_PORT", "JWT_SECRET_KEY", "AGORA_APP_ID", "AGORA_APP_CERTIFICATE"];
+const missingEnv = REQUIRED_ENV.filter((k) => !process.env[k]);
+if (missingEnv.length) {
+  console.error("[STARTUP] Missing required environment variables:", missingEnv.join(", "));
+  process.exit(1);
+}
+console.log("[STARTUP] config ok", { callGraceMs: process.env.CALL_GRACE_MS || 20000, callRingTimeoutMs: process.env.CALL_RING_TIMEOUT_MS || 30000, chatGraceMs: process.env.CHAT_GRACE_MS || 20000 });
+
 connectDB();
 const path = require("path");
 const fs = require("fs");

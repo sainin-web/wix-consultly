@@ -99,6 +99,7 @@ function ConsultantCards() {
 
   const [shopId, setShopId] = useState(null);
   const [loginPrompt, setLoginPrompt] = useState(false);
+  const [callError, setCallError] = useState("");
   const { consultants, loading } = useSelector((state) => state.consultants);
   const { voucherData } = useSelector((state) => state.users);
   const params = new URLSearchParams(window.location.search);
@@ -207,13 +208,23 @@ function ConsultantCards() {
       setLoginPrompt(true);
       return;
     }
-    await openCallPage({
+    const result = await openCallPage({
       receiverId,
       type,
       userId,
       shop,
       storeUrl: shop_id || shop,
+      returnTo: window.location.pathname,
     });
+    if (result?.ok) {
+      navigate(result.path);
+      return;
+    }
+    if (result?.code === "login_required") {
+      setLoginPrompt(true);
+      return;
+    }
+    setCallError(result?.message || "Call could not be started. Please try again.");
   };
 
   if (initialLoading || loading) {
@@ -317,6 +328,17 @@ function ConsultantCards() {
         </div>
       )}
 
+      {callError && (
+        <div className="cc-modal" role="alertdialog" aria-modal="true" aria-labelledby="cc-call-err">
+          <div className="cc-modal__panel">
+            <h2 className="cc-modal__title" id="cc-call-err">Unable to start the call</h2>
+            <p className="cc-modal__text">{callError}</p>
+            <div className="cc-modal__actions">
+              <button type="button" className="cc-modal__btn cc-modal__btn--primary" onClick={() => setCallError("")}>OK</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="consultant-home__inner">
         <header className="consultant-home__intro">
           <h1 className="consultant-home__title">Find your consultant</h1>

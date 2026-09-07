@@ -1,476 +1,268 @@
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import AgoraRTC from "agora-rtc-sdk-ng";
 
+/**
+ * Agora media manager (agora-rtc-sdk-ng 4.x).
+ *
+ * This slice owns ONLY media: join/leave, local tracks, remote tracks and the
+ * SDK connection state. Call lifecycle and billing are decided by the server
+ * (services/callSession.js) and arrive through socketEventBridge.
+ *
+ * Listeners are attached once per client instance and the client is reused.
+ */
+AgoraRTC.setLogLevel(2);
 const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
-
-// 🔊 MIC CONTROL HELPERS
-
-export const enableMic = async () => {
-    if (!localAudioTrack) {
-        console.log("🎤 Creating & publishing mic track");
-        localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
-        // await localAudioTrack.setEnabled(false)
-        await client.publish([localAudioTrack]);
-    } else {
-        console.log("🎤 Enabling mic track");
-        localAudioTrack.setEnabled(true);
-    }
-};
-
-export const disableMic = async () => {
-    if (localAudioTrack) {
-        console.log("🔇 Disabling mic track");
-        await client.unpublish([localAudioTrack]);
-        localAudioTrack.stop();
-        localAudioTrack.close();
-        localAudioTrack = null;
-    }
-};
-
 
 let localAudioTrack = null;
 let localVideoTrack = null;
 let remoteAudioTrack = null;
 let remoteVideoTrack = null;
+let dispatchRef = null;
+let renewTokenFn = null;
+let listenersBound = false;
 
-// Export functions to get tracks for video rendering
 export const getLocalVideoTrack = () => localVideoTrack;
 export const getRemoteVideoTrack = () => remoteVideoTrack;
-let userLeftListenerAdded = false;
-let callConnectedEmitted = false; // Track if call-connected event has been emitted
-let timerStarted = false; // Track if timer start event has been emitted
+export const getAgoraClient = () => client;
 
+/** Map SDK errors to something a human can act on. */
+export function describeMediaError(err, callType) {
+  const code = String(err?.code || err?.name || "");
+  const msg = String(err?.message || "");
+  if (code.includes("PERMISSION_DENIED") || /permission/i.test(msg)) {
+    return {
+      code: "permission_denied",
+      message:
+        callType === "video"
+          ? "Camera and microphone access are required for a video consultation. Please allow access in your browser settings and try again."
+          : "Microphone access is required to start an audio consultation. Please allow access in your browser settings and try again.",
+    };
+  }
+  if (code.includes("NOT_FOUND") || /device not found/i.test(msg)) {
+    return { code: "device_not_found", message: callType === "video" ? "No camera or microphone was found on this device." : "No microphone was found on this device." };
+  }
+  if (code.includes("NOT_READABLE") || /in use|could not start/i.test(msg)) {
+    return { code: "device_busy", message: "Your camera or microphone is already in use by another application." };
+  }
+  if (code.includes("NOT_SUPPORTED") || /not support/i.test(msg)) {
+    return { code: "not_supported", message: "Your browser does not support calling. Please use a recent version of Chrome, Edge, Safari or Firefox." };
+  }
+  if (code.includes("INVALID_TOKEN") || code.includes("TOKEN") || /token/i.test(msg)) {
+    return { code: "token", message: "The call could not be authorised. Please try again." };
+  }
+  return { code: "join_failed", message: "Unable to connect the call. Please check your internet connection and try again." };
+}
 
-const checkAndEmitCallConnected = () => {
-    console.log("Both user joined and connection state is connected timer should start");
-    if (
-        client.connectionState === "CONNECTED" &&
-        client.remoteUsers.length > 0 &&
-        !callConnectedEmitted
-    ) {
-        callConnectedEmitted = true;
+function bindClientListeners() {
+  if (listenersBound) return;
+  listenersBound = true;
 
-        window.dispatchEvent(
-            new CustomEvent("call-connected", {
-                detail: {
-                    at: Date.now(),
-                    remoteUid: client.remoteUsers[0]?.uid
-                }
-            })
-        );
+  client.on("connection-state-change", (cur, prev, reason) => {
+    console.log("[CALL] agora state", prev, "→", cur, reason || "");
+    dispatchRef?.(callSlice.actions.setAgoraState(cur));
+  });
 
-        console.log("🔥 CALL CONNECTED (SAFE)");
+  client.on("user-joined", (user) => {
+    console.log("[CALL] remote joined", user.uid);
+    dispatchRef?.(callSlice.actions.setRemoteJoined(true));
+  });
+
+  client.on("user-left", (user, reason) => {
+    console.log("[CALL] remote left", user.uid, reason);
+    remoteAudioTrack?.stop();
+    remoteAudioTrack = null;
+    remoteVideoTrack?.stop();
+    remoteVideoTrack = null;
+    dispatchRef?.(callSlice.actions.setRemoteJoined(false));
+    dispatchRef?.(callSlice.actions.setRemoteMedia({ audio: false, video: false }));
+  });
+
+  client.on("user-published", async (user, mediaType) => {
+    try {
+      await client.subscribe(user, mediaType);
+      if (mediaType === "audio") {
+        remoteAudioTrack = user.audioTrack;
+        remoteAudioTrack?.play();
+        dispatchRef?.(callSlice.actions.setRemoteMedia({ audio: true }));
+      } else if (mediaType === "video") {
+        remoteVideoTrack = user.videoTrack;
+        dispatchRef?.(callSlice.actions.setRemoteMedia({ video: true }));
+        window.dispatchEvent(new Event("remote-video-ready"));
+      }
+    } catch (err) {
+      console.error("[CALL ERROR] subscribe failed:", err?.message);
     }
-};
+  });
 
-// Timer start function - fires when both users join
-const tryStartTimer = () => {
-    if (
-        !timerStarted &&
-        client.connectionState === "CONNECTED" &&
-        client.remoteUsers.length > 0
-    ) {
-        timerStarted = true;
-
-        console.log("🔥 BOTH USER JOINED → TIMER START");
-
-        window.dispatchEvent(
-            new CustomEvent("call-timer-start", {
-                detail: {
-                    startedAt: Date.now(),
-                    remoteUid: client.remoteUsers[0]?.uid
-                }
-            })
-        );
+  client.on("user-unpublished", (user, mediaType) => {
+    if (mediaType === "audio") {
+      remoteAudioTrack?.stop();
+      remoteAudioTrack = null;
+      dispatchRef?.(callSlice.actions.setRemoteMedia({ audio: false }));
+    } else if (mediaType === "video") {
+      remoteVideoTrack?.stop();
+      remoteVideoTrack = null;
+      dispatchRef?.(callSlice.actions.setRemoteMedia({ video: false }));
     }
-};
+  });
 
+  // Token renewal: the server mints a fresh token for the same call/uid.
+  client.on("token-privilege-will-expire", async () => {
+    console.log("[CALL] token about to expire → renewing");
+    try {
+      const fresh = await renewTokenFn?.();
+      if (fresh) await client.renewToken(fresh);
+    } catch (err) {
+      console.error("[CALL ERROR] token renewal failed:", err?.message);
+    }
+  });
+  client.on("token-privilege-did-expire", async () => {
+    console.warn("[CALL] token expired");
+    try {
+      const fresh = await renewTokenFn?.();
+      if (fresh) await client.renewToken(fresh);
+    } catch (err) {
+      dispatchRef?.(callSlice.actions.setMediaError({ code: "token", message: "The call authorisation expired." }));
+    }
+  });
+}
 
-export const startCall = createAsyncThunk(
-    "call/startCall",
-    async ({ token, channel, uid, appId, callType = "voice" }, { rejectWithValue }) => {
+async function releaseLocalTracks() {
+  for (const t of [localAudioTrack, localVideoTrack]) {
+    try { t?.stop(); t?.close(); } catch (e) { /* ignore */ }
+  }
+  localAudioTrack = null;
+  localVideoTrack = null;
+}
+
+/**
+ * Join the Agora channel and publish local media.
+ * Audio call: mic on. Video call: mic + camera on; if the camera is unavailable
+ * the call continues audio-only and `warning` says why.
+ */
+export const joinCall = createAsyncThunk(
+  "call/join",
+  async ({ appId, channel, token, uid, callType = "voice", renewToken }, { dispatch, rejectWithValue }) => {
+    dispatchRef = dispatch;
+    renewTokenFn = renewToken || null;
+    bindClientListeners();
+    const numericUid = Number(uid);
+    let warning = null;
+    try {
+      if (!appId || !channel || !token) throw new Error("Missing Agora credentials");
+      if (client.connectionState !== "DISCONNECTED") {
+        try { await client.leave(); } catch (e) { /* ignore */ }
+      }
+      await releaseLocalTracks();
+
+      // Create local media BEFORE joining so a permission failure never joins a channel.
+      try {
+        localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
+      } catch (err) {
+        const d = describeMediaError(err, callType);
+        console.error("[CALL ERROR] microphone:", d.code);
+        return rejectWithValue(d);
+      }
+      if (callType === "video") {
         try {
-            const numericUid = typeof uid === 'string' ? parseInt(uid) : uid;
-            const agoraAppId = appId || process.env.REACT_APP_AGORA_APP_ID;
-
-            console.log(`Starting ${callType} call:`, {
-                channel,
-                uid: numericUid,
-                appId: agoraAppId,
-                tokenLength: token?.length,
-                callType
-            });
-
-            if (!agoraAppId) {
-                throw new Error("Agora App ID is required");
-            }
-
-            if (!token) {
-                throw new Error("Token is required");
-            }
-
-            if (!channel) {
-                throw new Error("Channel name is required");
-            }
-
-            // Leave existing connection if any
-            if (client.connectionState !== "DISCONNECTED" && client.connectionState !== "DISCONNECTING") {
-                console.log("Leaving existing connection...");
-                try {
-                    await client.leave();
-                } catch (leaveError) {
-                    console.warn("Error leaving previous connection:", leaveError);
-                }
-            }
-
-            // Join channel
-            console.log("Joining channel...", {
-                appId: agoraAppId,
-                channel,
-                uid: numericUid,
-                tokenPreview: token?.substring(0, 20) + "..."
-            });
-
-            try {
-                await client.join(agoraAppId, channel, token, numericUid);
-                console.log("Joined channel successfully. Connection state:", client.connectionState);
-                console.log("Local UID after join:", client.uid);
-            } catch (joinError) {
-                console.error("Failed to join channel:", joinError);
-                throw new Error(`Failed to join channel: ${joinError.message}`);
-            }
-            // ✅ JOIN hone ke baad hi listener lagana zaroori hai
-            if (!userLeftListenerAdded) {
-                client.on("user-left", (user, reason) => {
-                    console.log("🚨 Remote user left:", user.uid, reason);
-
-                    // Remote tracks cleanup
-                    remoteAudioTrack?.stop();
-                    remoteAudioTrack = null;
-
-                    remoteVideoTrack?.stop();
-                    remoteVideoTrack = null;
-
-                    // 🔥 React ko inform karo
-                    window.dispatchEvent(
-                        new CustomEvent("remote-user-left", {
-                            detail: { uid: user.uid, reason }
-                        })
-                    );
-                });
-
-                userLeftListenerAdded = true;
-            }
-
-
-            // Create and publish tracks based on call type
-            if (callType === "video") {
-                console.log("Creating video tracks...");
-                try {
-                    // Try to create both audio and video tracks
-                    try {
-                        [localAudioTrack, localVideoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
-                        console.log("Video tracks created successfully");
-                    } catch (audioError) {
-                        // If audio device not found, try creating only video track
-                        if (audioError.code === 'DEVICE_NOT_FOUND' || audioError.message?.includes('device not found')) {
-                            console.warn("Audio device not found, continuing with video only:", audioError.message);
-                            try {
-                                localVideoTrack = await AgoraRTC.createCameraVideoTrack({
-                                    encoderConfig: {
-                                        width: 640,
-                                        height: 480,
-                                        frameRate: 15,
-                                        bitrateMin: 400,
-                                        bitrateMax: 800
-                                    }
-                                });
-                                console.log("Video track created successfully (audio unavailable)");
-                            } catch (videoError) {
-                                console.error("Failed to create video track:", videoError);
-                                throw videoError;
-                            }
-                        } else {
-                            throw audioError;
-                        }
-                    }
-
-                    // Video call: default camera OFF and mic OFF; user turns on when ready
-                    if (localAudioTrack) localAudioTrack.setEnabled(false);
-                    if (localVideoTrack) localVideoTrack.setEnabled(false);
-
-                    // Publish available tracks
-                    const tracksToPublish = [localAudioTrack, localVideoTrack].filter(Boolean);
-                    if (tracksToPublish.length > 0) {
-                        console.log("Publishing tracks...", { audio: !!localAudioTrack, video: !!localVideoTrack });
-                        await client.publish(tracksToPublish);
-                        console.log("Published local tracks successfully");
-                        console.log("Published tracks status:", {
-                            audio: localAudioTrack?.isPlaying || false,
-                            video: localVideoTrack?.isPlaying || false
-                        });
-                    } else {
-                        console.warn("No tracks available to publish");
-                    }
-
-                    // Try to play local video immediately if element exists - Multiple attempts
-                    if (localVideoTrack) {
-                        const playLocalVideo = () => {
-                            const localVideoElement = document.querySelector('[data-local-video]');
-                            if (localVideoElement && localVideoTrack) {
-                                localVideoTrack.play(localVideoElement).then(() => {
-                                    console.log("Local video playing on element successfully");
-                                }).catch(err => {
-                                    console.error("Error playing local video:", err);
-                                });
-                            }
-                        };
-
-                        // Try multiple times with delays
-                        setTimeout(playLocalVideo, 100);
-                        setTimeout(playLocalVideo, 500);
-                        setTimeout(playLocalVideo, 1000);
-
-                        // Dispatch event for component to handle
-                        window.dispatchEvent(new Event('local-video-ready'));
-                    }
-                } catch (trackError) {
-                    console.error("Error creating/publishing video tracks:", trackError);
-                    // Don't throw error - allow call to continue even without local tracks
-                    // Remote user can still join and timer should start
-                    console.warn("Continuing call without local tracks due to device error");
-                }
-            } else {
-                console.log("Creating audio track...");
-                try {
-                    localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
-                    console.log("Audio track created successfully");
-
-                    // Start muted (matches initialState.muted: true); user unmutes to enable
-                    if (localAudioTrack) localAudioTrack.setEnabled(false);
-
-                    console.log("Publishing audio track...");
-                    await client.publish([localAudioTrack]);
-                    console.log("Published local audio track successfully");
-                    console.log("Audio track status:", localAudioTrack?.isPlaying || false);
-                } catch (trackError) {
-                    // Handle device not found error gracefully
-                    if (trackError.code === 'DEVICE_NOT_FOUND' || trackError.message?.includes('device not found')) {
-                        console.warn("Audio device not found, continuing call without local audio:", trackError.message);
-                        // Don't throw error - allow call to continue
-                        // User can still receive remote audio and timer should start
-                    } else {
-                        console.error("Error creating/publishing audio track:", trackError);
-                        // For other errors, still don't throw - allow call to continue
-                        console.warn("Continuing call despite audio track error");
-                    }
-                }
-            }
-
-            // Verify tracks are published (default: mic and camera off for video call)
-            const publishedTracks = client.localTracks;
-            console.log("Local tracks published:", publishedTracks.length);
-
-            // Verify connection state
-            console.log("Final connection state:", client.connectionState);
-            console.log("Channel name:", channel);
-            console.log("Local UID:", client.uid);
-
-            // Setup event listeners for remote users
-            const handleUserPublished = async (user, mediaType) => {
-                console.log(`Remote user published ${mediaType}. User UID:`, user.uid);
-
-                try {
-                    if (mediaType === "audio") {
-                        remoteAudioTrack = await client.subscribe(user, mediaType);
-                        await remoteAudioTrack.play();
-                        console.log("Playing remote audio successfully");
-                    } else if (mediaType === "video") {
-                        remoteVideoTrack = await client.subscribe(user, mediaType);
-                        console.log("Remote video track subscribed successfully");
-
-                        // Try to play immediately and also dispatch event
-                        const playRemoteVideo = () => {
-                            const remoteVideoElement = document.querySelector('[data-remote-video]');
-                            if (remoteVideoElement && remoteVideoTrack) {
-                                remoteVideoTrack.play(remoteVideoElement, {
-                                    fit: "contain"   // 🔥 NO ZOOM
-                                }).then(() => {
-                                    console.log("Playing remote video (no zoom)");
-                                }).catch(err => {
-                                    console.error("Error playing remote video:", err);
-                                });
-                            }
-                        };
-
-                        // Try immediately
-                        setTimeout(playRemoteVideo, 100);
-
-                        // Also try after a delay
-                        setTimeout(playRemoteVideo, 500);
-                        setTimeout(playRemoteVideo, 1000);
-
-                        // Dispatch custom event to notify component
-                        window.dispatchEvent(new Event('remote-video-ready'));
-                    }
-                } catch (error) {
-                    console.error(`Error handling remote ${mediaType}:`, error);
-                }
-            };
-
-
-            client.on("user-joined", (user) => {
-                console.log("User joined channel. UID:", user.uid);
-                checkAndEmitCallConnected();
-                tryStartTimer(); // Start timer when both users join
-                // Receiver refresh ke baad re-join par caller ko pata chale, call end na kare
-                window.dispatchEvent(new CustomEvent("remote-user-rejoined", { detail: { uid: user.uid } }));
-            });
-
-            // Listen for connection state changes
-            client.on("connection-state-change", (curState, revState) => {
-                console.log("Connection state changed:", { from: revState, to: curState });
-                checkAndEmitCallConnected();
-                tryStartTimer(); // Start timer when connection state changes to CONNECTED
-            });
-
-            const handleUserUnpublished = async (user, mediaType) => {
-
-
-                if (mediaType === "audio") {
-                    console.log("Remote user unpublished audio");
-                    remoteAudioTrack?.stop();
-                    remoteAudioTrack = null;
-                } else if (mediaType === "video") {
-                    console.log("Remote user unpublished video");
-                    remoteVideoTrack?.stop();
-                    remoteVideoTrack = null;
-                    window.dispatchEvent(new Event('remote-video-stopped'));
-                }
-
-            };
-
-            // Remove old listeners and add new ones
-            client.off("user-published", handleUserPublished);
-            client.off("user-unpublished", handleUserUnpublished);
-            client.on("user-published", handleUserPublished);
-            client.on("user-unpublished", handleUserUnpublished);
-
-            console.log(`${callType} call setup complete`);
-            return { channel, type: callType };
-        } catch (error) {
-            console.error(`START ${callType.toUpperCase()} CALL FAILED:`, error);
-            return rejectWithValue(error.message);
+          localVideoTrack = await AgoraRTC.createCameraVideoTrack({
+            encoderConfig: { width: 640, height: 480, frameRate: 15, bitrateMin: 300, bitrateMax: 900 },
+          });
+        } catch (err) {
+          const d = describeMediaError(err, "video");
+          console.warn("[CALL] camera unavailable, continuing audio-only:", d.code);
+          warning = { code: "camera_unavailable", message: "Your camera is unavailable — continuing with audio only." };
+          localVideoTrack = null;
         }
+      }
+
+      await client.join(appId, channel, token, numericUid);
+      console.log("[CALL] joined channel", channel, "uid", client.uid);
+      await client.publish([localAudioTrack, localVideoTrack].filter(Boolean));
+      return { channel, callType, hasVideo: Boolean(localVideoTrack), warning };
+    } catch (err) {
+      await releaseLocalTracks();
+      try { if (client.connectionState !== "DISCONNECTED") await client.leave(); } catch (e) { /* ignore */ }
+      const d = describeMediaError(err, callType);
+      console.error("[CALL ERROR] join failed:", err?.message);
+      return rejectWithValue(d);
     }
+  },
 );
 
-// Legacy functions for backward compatibility
-export const startVoiceCall = createAsyncThunk(
-    "call/startVoice",
-    async (params, { dispatch }) => {
-        return dispatch(startCall({ ...params, callType: "voice" })).unwrap();
-    }
-);
-
-export const startVideoCall = createAsyncThunk(
-    "call/startVideo",
-    async (params, { dispatch }) => {
-        return dispatch(startCall({ ...params, callType: "video" })).unwrap();
-    }
-);
-
-export const endCall = createAsyncThunk(
-    "call/end",
-    async () => {
-        // Stop and cleanup remote tracks
-        remoteAudioTrack?.stop();
-        remoteAudioTrack = null;
-        remoteVideoTrack?.stop();
-        remoteVideoTrack = null;
-
-        // Stop and cleanup local tracks
-        localAudioTrack?.stop();
-        localAudioTrack?.close();
-        localAudioTrack = null;
-
-        localVideoTrack?.stop();
-        localVideoTrack?.close();
-        localVideoTrack = null;
-
-        // Reset flags for next call
-        callConnectedEmitted = false;
-        timerStarted = false;
-
-        // Leave channel – remote peer will get Agora "user offline" / "user-left" (reason: Quit)
-        await client.leave();
-        console.log("Call ended and cleaned up");
-    }
-);
-
-const callSlice = createSlice({
-    name: "call",
-    initialState: {
-        inCall: false,
-        channel: null,
-        type: null,
-        muted: true,
-        videoEnabled: true,
-    },
-    reducers: {
-        // Use setEnabled only (sync) so voice transfers immediately. Do not destroy track on mute.
-        toggleMute: state => {
-            state.muted = !state.muted;
-            if (localAudioTrack) {
-                localAudioTrack.setEnabled(!state.muted);
-                console.log("🎤 Mic", state.muted ? "muted" : "unmuted");
-            }
-        },
-
-        toggleVideo: state => {
-            state.videoEnabled = !state.videoEnabled;
-            localVideoTrack?.setEnabled(state.videoEnabled);
-        },
-    },
-    extraReducers: builder => {
-        builder
-            .addCase(startCall.pending, (state) => {
-                console.log("Call pending...");
-            })
-            .addCase(startCall.fulfilled, (state, action) => {
-                console.log("Call fulfilled:", action.payload);
-                state.inCall = true;
-                state.channel = action.payload.channel;
-                state.type = action.payload.type;
-                // Video call: start with camera off; voice call doesn't use video
-                state.videoEnabled = action.payload.type === "video" ? false : true;
-            })
-            .addCase(startCall.rejected, (state, action) => {
-                console.error("Call rejected:", action.payload);
-                state.inCall = false;
-                state.channel = null;
-                state.type = null;
-            })
-            .addCase(startVoiceCall.fulfilled, (state, action) => {
-                state.inCall = true;
-                state.channel = action.payload.channel;
-                state.type = "voice";
-            })
-            .addCase(startVideoCall.fulfilled, (state, action) => {
-                state.inCall = true;
-                state.channel = action.payload.channel;
-                state.type = "video";
-                state.videoEnabled = false; // Camera off by default
-            })
-            .addCase(endCall.fulfilled, state => {
-                state.inCall = false;
-                state.channel = null;
-                state.type = null;
-                state.muted = false;
-                state.videoEnabled = true;
-            });
-    },
+export const leaveCall = createAsyncThunk("call/leave", async () => {
+  remoteAudioTrack?.stop();
+  remoteVideoTrack?.stop();
+  remoteAudioTrack = null;
+  remoteVideoTrack = null;
+  await releaseLocalTracks();
+  try {
+    if (client.connectionState !== "DISCONNECTED") await client.leave();
+  } catch (e) { /* ignore */ }
+  console.log("[CALL] left channel");
 });
 
-export const { toggleMute, toggleVideo } = callSlice.actions;
+const initialState = {
+  phase: "idle", // idle | joining | joined | failed
+  agoraState: "DISCONNECTED",
+  channel: null,
+  callType: null,
+  muted: false,
+  videoEnabled: false,
+  hasLocalVideo: false,
+  remoteJoined: false,
+  remoteAudioOn: false,
+  remoteVideoOn: false,
+  mediaError: null,
+  mediaWarning: null,
+};
+
+const callSlice = createSlice({
+  name: "call",
+  initialState,
+  reducers: {
+    setAgoraState: (state, action) => { state.agoraState = action.payload; },
+    setRemoteJoined: (state, action) => { state.remoteJoined = Boolean(action.payload); },
+    setRemoteMedia: (state, action) => {
+      const p = action.payload || {};
+      if (p.audio !== undefined) state.remoteAudioOn = p.audio;
+      if (p.video !== undefined) state.remoteVideoOn = p.video;
+    },
+    setMediaError: (state, action) => { state.mediaError = action.payload; },
+    toggleMute: (state) => {
+      state.muted = !state.muted;
+      localAudioTrack?.setEnabled(!state.muted);
+    },
+    toggleVideo: (state) => {
+      if (!localVideoTrack) return;
+      state.videoEnabled = !state.videoEnabled;
+      localVideoTrack.setEnabled(state.videoEnabled);
+    },
+    resetCallMedia: () => initialState,
+  },
+  extraReducers: (builder) => {
+    builder
+      .addCase(joinCall.pending, (state) => {
+        state.phase = "joining";
+        state.mediaError = null;
+        state.mediaWarning = null;
+      })
+      .addCase(joinCall.fulfilled, (state, action) => {
+        state.phase = "joined";
+        state.channel = action.payload.channel;
+        state.callType = action.payload.callType;
+        state.hasLocalVideo = action.payload.hasVideo;
+        state.videoEnabled = action.payload.hasVideo;
+        state.muted = false;
+        state.mediaWarning = action.payload.warning || null;
+      })
+      .addCase(joinCall.rejected, (state, action) => {
+        state.phase = "failed";
+        state.mediaError = action.payload || { code: "join_failed", message: "Unable to connect the call." };
+      })
+      .addCase(leaveCall.fulfilled, () => initialState);
+  },
+});
+
+export const { toggleMute, toggleVideo, resetCallMedia, setMediaError } = callSlice.actions;
 export default callSlice.reducer;

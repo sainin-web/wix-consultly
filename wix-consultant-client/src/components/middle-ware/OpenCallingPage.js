@@ -1,28 +1,17 @@
 import axios from "axios";
 import { checkMicPermission } from "../ConsultantCards/ConsultantCards";
-import {
-  socket,
-  ensureSocketRegistered,
-  SOCKET_ROLE,
-} from "../Sokect-io/SokectConfig";
+import { ensureSocketRegistered, SOCKET_ROLE } from "../Sokect-io/SokectConfig";
 import { getCustomerId, getShopId } from "../../utils/wixStorage";
 
-export const checkUserBalance = async ({
-  userId,
-  consultantId,
-  type,
-}) => {
-  if (!userId || !consultantId) {
-    return { requiresLogin: true };
-  }
+const BACKEND = process.env.REACT_APP_BACKEND_HOST;
+
+/** Kept for the chat flow (balance pre-check before a chat request). */
+export const checkUserBalance = async ({ userId, consultantId, type }) => {
+  if (!userId || !consultantId) return { requiresLogin: true };
   try {
     const response = await axios.get(
-      `${process.env.REACT_APP_BACKEND_HOST}/api/users/shopify/users/checked-balance/${userId}/${consultantId}`,
-      {
-        params: {
-          callType: type,
-        },
-      },
+      `${BACKEND}/api/users/shopify/users/checked-balance/${userId}/${consultantId}`,
+      { params: { callType: type } },
     );
     return response.data.data;
   } catch (error) {
@@ -30,149 +19,48 @@ export const checkUserBalance = async ({
   }
 };
 
-/** Build Agora calling page URL from env (no hardcoded ngrok). */
-export function buildCallPageUrl({
-  callerId,
-  receiverId,
-  callType,
-  uid,
-  channelName,
-  token,
-  appId,
-  userId,
-  userType,
-  shopId,
-  returnUrl,
-}) {
-  const base =
-    process.env.REACT_APP_FRONTEND_URL?.replace(/\/$/, "") ||
-    window.location.origin;
-  const tokenEncoded = encodeURIComponent(token);
-  const appIdParam = appId ? `&appId=${encodeURIComponent(appId)}` : "";
-  const shopParam = shopId ? `&shopId=${encodeURIComponent(shopId)}` : "";
-  const returnParam = returnUrl
-    ? `&returnUrl=${encodeURIComponent(returnUrl)}`
-    : "";
-
-  return (
-    `${base}/video/calling/page` +
-    `?callerId=${encodeURIComponent(callerId)}` +
-    `&receiverId=${encodeURIComponent(receiverId)}` +
-    `&callType=${encodeURIComponent(callType || "voice")}` +
-    `&uid=${encodeURIComponent(uid)}` +
-    `&channelName=${encodeURIComponent(channelName)}` +
-    `&token=${tokenEncoded}` +
-    appIdParam +
-    `&userId=${encodeURIComponent(userId)}` +
-    `&userType=${encodeURIComponent(userType)}` +
-    shopParam +
-    returnParam
-  );
+/** In-app call page URL (stays inside the Wix iframe — never window.top). */
+export function callPagePath(callId, returnTo) {
+  const instance = new URLSearchParams(window.location.search).get("instance") || localStorage.getItem("wix_instance") || "";
+  const q = new URLSearchParams();
+  q.set("callId", callId);
+  if (instance) q.set("instance", instance);
+  if (returnTo) q.set("return", returnTo);
+  return `/video/calling/page?${q.toString()}`;
 }
 
-export function navigateToCallPage(callUrl) {
-  try {
-    if (window.top && window.top !== window.self) {
-      window.top.location.href = callUrl;
-    } else {
-      window.open(callUrl, "_blank", "noopener,noreferrer");
-    }
-  } catch {
-    window.location.href = callUrl;
-  }
-}
-
-export const openCallPage = async ({
-  receiverId,
-  type,
-  userId,
-  shop,
-  storeUrl,
-}) => {
+/**
+ * Ask the server to start a call. The server validates balance, availability
+ * and creates the session; it also rings the consultant.
+ *
+ * @returns {{ ok:true, callId, path } | { ok:false, code, message }}
+ */
+export const openCallPage = async ({ receiverId, type, userId, shop, storeUrl, returnTo }) => {
   const callerId = userId || getCustomerId();
   const shopKey = storeUrl || shop || getShopId();
+  if (!callerId || !receiverId) return { ok: false, code: "login_required", message: "Please log in to start a call." };
 
-  if (!callerId || !receiverId) {
-    alert("You need to login first to make a call.");
-    return;
+  const micState = await checkMicPermission();
+  if (micState === "denied") {
+    return { ok: false, code: "permission_denied", message: "Microphone access is required. Please allow it in your browser settings." };
   }
 
+  const registered = await ensureSocketRegistered(callerId, { role: SOCKET_ROLE.CUSTOMER });
+  if (!registered) return { ok: false, code: "socket", message: "Could not connect for calling. Please refresh and try again." };
+
   try {
-    const balance = await checkUserBalance({
-      userId: callerId,
-      consultantId: receiverId,
-      type,
-    });
-    if (!balance) {
-      alert("You have insufficient balance");
-      return;
-    }
-    if (balance?.requiresLogin) {
-      alert("You need to login first to make a call.");
-      return;
-    }
-
-    const micState = await checkMicPermission();
-    if (micState === "denied") {
-      alert("Please grant microphone permission");
-      return;
-    }
-
-    const ok = await ensureSocketRegistered(callerId, {
-      role: SOCKET_ROLE.CUSTOMER,
-    });
-    if (!ok) {
-      alert("Could not connect for calling. Please refresh and try again.");
-      return;
-    }
-
-    const channelName = `channel-${String(callerId).slice(-6)}-${String(receiverId).slice(-6)}`;
-    const uid = Math.floor(Math.random() * 1000000);
-    const res = await axios.post(
-      `${process.env.REACT_APP_BACKEND_HOST}/api/call/generate-token`,
-      {
-        channelName,
-        uid,
-        callerId,
-        receiverId,
-      },
-      { headers: { "Content-Type": "application/json" } },
-    );
-
-    const data = res.data;
-    if (!data?.token) {
-      throw new Error("Token missing from API");
-    }
-
-    socket.emit("call-user", {
+    console.log("[CALL] Request", { callerId, receiverId, type });
+    const { data } = await axios.post(`${BACKEND}/api/call/request`, {
       callerId,
       receiverId,
-      channelName,
-      callType: type || "voice",
-      shop: shopKey,
-    });
-
-    const returnUrl =
-      window.location.href ||
-      `${window.location.origin}/consultant/card`;
-
-    const callUrl = buildCallPageUrl({
-      callerId,
-      receiverId,
-      callType: type || "voice",
-      uid,
-      channelName,
-      token: data.token,
-      appId: data.appId,
-      userId: callerId,
-      userType: "client",
+      callType: type === "video" ? "video" : "voice",
       shopId: shopKey,
-      returnUrl,
     });
-
-    navigateToCallPage(callUrl);
+    if (!data?.success || !data.call?.callId) return { ok: false, code: "request_failed", message: data?.message || "Call could not be started." };
+    return { ok: true, callId: data.call.callId, path: callPagePath(data.call.callId, returnTo || window.location.pathname) };
   } catch (error) {
-    console.error("[call] openCallPage failed:", error?.message || error);
-    alert("Call failed. Please try again.");
+    const body = error.response?.data || {};
+    console.warn("[CALL] request rejected", body.code || error.message);
+    return { ok: false, code: body.code || "request_failed", message: body.message || "Call could not be started. Please try again." };
   }
 };

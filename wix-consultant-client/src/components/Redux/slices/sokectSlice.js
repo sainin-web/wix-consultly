@@ -59,6 +59,12 @@ const socketSlice = createSlice({
         messageRejected: null,
         /** Bell feed (session-scoped): [{ id, type:"message"|"missed_call", title, text, from, at, read }] */
         notifications: [],
+        /** Latest call lifecycle event from the server: { type, payload, at } */
+        callEvent: null,
+        /** Final result of the last ended call (server payload) */
+        callEndSummary: null,
+        /** Other call participant link state: { callId, role, connected, graceMs, since } */
+        callPeer: null,
     },
     reducers: {
         setConnected: (state, action) => {
@@ -143,7 +149,14 @@ const socketSlice = createSlice({
             const p = action.payload || {};
             const id = `missed:${p.callId || Date.now()}`;
             if (state.notifications.some((x) => x.id === id)) return;
-            const callerId = p.callId ? String(p.callId).split("_")[0] : state.incomingCall?.callerId || null;
+            // Callee only: either this consultant had the incoming card for this call, or the
+            // legacy callId (caller_receiver_channel) names us as the receiver.
+            const legacy = String(p.callId || "").split("_");
+            const isCallee =
+                (state.incomingCall && String(state.incomingCall.callId) === String(p.callId)) ||
+                (legacy.length >= 3 && p.me && legacy[1] === String(p.me));
+            if (!isCallee) return;
+            const callerId = state.incomingCall?.callerId || (legacy.length >= 3 ? legacy[0] : null);
             state.notifications.unshift({
                 id,
                 type: "missed_call",
@@ -168,6 +181,17 @@ const socketSlice = createSlice({
         clearNotifications: (state) => {
             state.notifications = [];
         },
+        setCallEvent: (state, action) => {
+            state.callEvent = { ...action.payload, at: Date.now() };
+            if (action.payload?.type === "ended") {
+                state.callEndSummary = action.payload.payload || null;
+                state.callPeer = null;
+            }
+            if (["connected", "accepted"].includes(action.payload?.type)) state.callEndSummary = null;
+        },
+        clearCallEvent: (state) => { state.callEvent = null; },
+        clearCallEndSummary: (state) => { state.callEndSummary = null; },
+        setCallPeer: (state, action) => { state.callPeer = action.payload; },
         setAutoChatEnded: (state, action) => {
             state.autoChatEnded = action.payload;
         },
@@ -216,6 +240,10 @@ export const {
     markAllNotificationsRead,
     dismissNotificationsFrom,
     clearNotifications,
+    setCallEvent,
+    clearCallEvent,
+    clearCallEndSummary,
+    setCallPeer,
     setAutoChatEnded,
     setIncomingCall,
     setCallAccepted,

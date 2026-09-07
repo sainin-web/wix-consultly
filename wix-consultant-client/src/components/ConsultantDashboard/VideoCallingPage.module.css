@@ -1,754 +1,328 @@
-/* Video Calling Page Styles */
-.videoCallContainer {
-    width: 100vw;
-    height: 100vh;
-    background: #000;
-    display: flex;
-    flex-direction: column;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    overflow: hidden;
-    z-index: 9999;
+/*
+ * Call page — bounded shell inside the Wix iframe.
+ * No vh, no position:fixed. The shell has a designed height (component-level
+ * exception, like the chat pane); overlays are absolute INSIDE it.
+ */
+
+.page {
+  --c-bg: #f6f7f9;
+  --c-surface: #ffffff;
+  --c-ink: #111318;
+  --c-muted: #666b78;
+  --c-subtle: #9096a3;
+  --c-line: #e6e8ec;
+  --c-accent: #16181d;
+  --c-danger: #b42318;
+  --c-danger-soft: #fef3f2;
+  --c-success: #067647;
+  --c-success-soft: #ecfdf3;
+  --c-warn: #b54708;
+  --c-warn-soft: #fffaeb;
+  --c-stage: #0f1115;
+
+  width: 100%;
+  padding: 20px 16px 28px;
+  box-sizing: border-box;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: var(--c-ink);
+  background: var(--c-bg);
 }
 
-/* Call Header */
-.callHeader {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    padding: 16px 20px;
-    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.7), transparent);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    z-index: 10;
-    /* border: 2px solid blue; */
+.shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1100px;
+  height: 600px;
+  margin: 0 auto;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
-.callHeaderLeft {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex: 1;
+/* ── Header ─────────────────────────────────────────────────── */
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--c-line);
 }
 
-.callHeaderRight {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
+.headLeft { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.headText { min-width: 0; }
+.headName { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.headSub { font-size: 12px; color: var(--c-muted); }
+.headAvatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; border: 1px solid var(--c-line); background: #eeeff2; flex-shrink: 0; }
+.headRight { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+.secure { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; color: var(--c-success); }
+.secure svg { width: 13px; height: 13px; }
+
+.timer {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--c-success-soft);
+  color: var(--c-success);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
-.callTimer {
-    font-size: 18px;
-    font-weight: 600;
-    color: white;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: 1px;
-    padding: 8px 16px;
-    background: rgba(255, 255, 255, 0.15);
-    border-radius: 20px;
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+.iconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--c-ink);
+  cursor: pointer;
+}
+.iconBtn svg { width: 18px; height: 18px; }
+.iconBtn:hover { background: #f2f3f5; }
+
+/* ── Banners ────────────────────────────────────────────────── */
+
+.banner {
+  flex-shrink: 0;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: center;
+  border-bottom: 1px solid var(--c-line);
+  background: #f2f3f5;
+  color: var(--c-muted);
+}
+.banner_ok { background: var(--c-success-soft); color: var(--c-success); }
+.banner_warn { background: var(--c-warn-soft); color: var(--c-warn); }
+.banner_danger { background: var(--c-danger-soft); color: var(--c-danger); }
+.banner_muted { background: #f2f3f5; color: var(--c-muted); }
+
+/* ── Stage ──────────────────────────────────────────────────── */
+
+.stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
 }
 
-.backButton {
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-    border: none;
-    background: rgba(255, 255, 255, 0.2);
-    color: white;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s;
-    backdrop-filter: blur(10px);
+.remote {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: var(--c-stage);
 }
 
-.backButton:hover {
-    background: rgba(255, 255, 255, 0.3);
-    transform: scale(1.05);
+.video { width: 100%; height: 100%; }
+.video > div { border-radius: 0 !important; }
+
+.placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #fff;
+  text-align: center;
 }
 
-.callInfo {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    color: white;
+.placeholder .phName { color: #fff; }
+.placeholder .phSub { color: rgba(255, 255, 255, 0.7); }
+
+.remoteMuted {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.remoteMuted svg { width: 13px; height: 13px; }
+
+.local {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  width: 200px;
+  aspect-ratio: 4 / 3;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #1c1f26;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.5);
 }
 
-.callAvatar {
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 600;
-    font-size: 18px;
-    border: 2px solid rgba(255, 255, 255, 0.3);
+.localOff {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+.localOff small { font-size: 11px; font-weight: 500; opacity: 0.7; }
+
+/* Audio stage */
+.audioStage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+  background: linear-gradient(180deg, #fafbfc 0%, #f2f3f6 100%);
 }
 
-.callName {
-    font-size: 18px;
-    font-weight: 600;
-    color: white;
-    margin-bottom: 4px;
+.ring {
+  position: relative;
+  padding: 6px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid var(--c-line);
+}
+.ringPulse::before,
+.ringPulse::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 2px solid rgba(22, 24, 29, 0.18);
+  animation: ringOut 1.8s ease-out infinite;
+}
+.ringPulse::after { animation-delay: 0.9s; }
+@keyframes ringOut { 0% { transform: scale(0.9); opacity: 1; } 100% { transform: scale(1.35); opacity: 0; } }
+
+.bigAvatar { width: 112px; height: 112px; border-radius: 50%; object-fit: cover; background: #eeeff2; display: block; }
+.phName { font-size: 18px; font-weight: 650; letter-spacing: -0.01em; margin-top: 8px; }
+.phSub { font-size: 13px; color: var(--c-muted); }
+
+.status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--c-muted); }
+.statusOk { color: var(--c-success); font-weight: 600; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c-success); }
+
+.bigTimer { margin-top: 6px; font-size: 32px; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+
+/* Summary (terminal states) */
+.summary {
+  margin-top: 8px;
+  width: 100%;
+  max-width: 400px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  text-align: left;
+}
+.summaryTitle { font-size: 16px; font-weight: 650; margin-bottom: 4px; }
+.summaryText { font-size: 13px; color: var(--c-muted); }
+.summaryGrid { display: grid; grid-template-columns: 1fr; gap: 0; margin: 10px 0 0; }
+.summaryGrid > div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--c-line); font-size: 13.5px; }
+.summaryGrid dt { color: var(--c-muted); }
+.summaryGrid dd { margin: 0; font-weight: 600; text-transform: capitalize; }
+.summaryActions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+/* ── Controls ───────────────────────────────────────────────── */
+
+.controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-shrink: 0;
+  padding: 12px 14px;
+  border-top: 1px solid var(--c-line);
+  background: var(--c-surface);
 }
 
-.callStatus {
-    font-size: 14px;
-    color: rgba(255, 255, 255, 0.8);
+.ctl,
+.endBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
 }
+.ctl svg, .endBtn svg { width: 18px; height: 18px; }
 
-/* Video Area */
-.videoArea {
-    flex: 1;
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #000;
-    overflow: hidden;
+.ctl { border: 1px solid var(--c-line); background: #fff; color: var(--c-ink); }
+.ctl:hover:enabled { background: #f2f3f5; }
+.ctlOff { background: var(--c-ink); color: #fff; border-color: var(--c-ink); }
+.ctlOff:hover:enabled { background: #2a2d35; }
+.ctl:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.endBtn { border: 0; background: var(--c-danger); color: #fff; }
+.endBtn:hover:enabled { background: #9a1c14; }
+.endBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* ── Buttons / modal ────────────────────────────────────────── */
+
+.btn, .btnGhost, .btnDanger {
+  padding: 9px 14px;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
 }
+.btn { border: 0; background: var(--c-accent); color: #fff; }
+.btnGhost { border: 1px solid #d1d5db; background: #fff; color: var(--c-ink); }
+.btnDanger { border: 0; background: var(--c-danger); color: #fff; }
 
-/* Remote Video (Main) - Full Screen */
-.remoteVideo {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(17, 24, 39, 0.45);
 }
+.modal { width: 100%; max-width: 380px; padding: 20px; background: #fff; border-radius: 12px; box-shadow: 0 16px 40px -8px rgba(16, 24, 40, 0.25); }
+.modalTitle { margin: 0 0 6px; font-size: 17px; font-weight: 650; }
+.modalText { margin: 0 0 16px; font-size: 13.5px; line-height: 1.5; color: var(--c-muted); }
+.modalActions { display: flex; justify-content: flex-end; gap: 8px; }
 
-.videoElement {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    background: #000;
-}
+/* ── Responsive ─────────────────────────────────────────────── */
 
-.videoPlaceholder {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 16px;
-    color: white;
-}
-
-.avatarLarge {
-    width: 120px;
-    height: 120px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 600;
-    font-size: 48px;
-    border: 4px solid rgba(255, 255, 255, 0.2);
-}
-
-.videoPlaceholderText {
-    font-size: 20px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.9);
-    margin: 0;
-}
-
-.videoPlaceholderTextSmall {
-    font-size: 10px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.7);
-    margin: 4px 0 0 0;
-    text-align: center;
-}
-
-/* Local Video (Small) - Instagram Style Corner Overlay */
-.localVideo {
-    position: absolute;
-    bottom: 100px;
-    right: 20px;
-    width: 120px;
-    height: 160px;
-    min-width: 120px;
-    min-height: 160px;
-    border-radius: 12px;
-    overflow: hidden;
-    border: 2px solid rgba(255, 255, 255, 0.5);
-    background: #2a2a2a;
-    z-index: 5;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-    cursor: pointer;
-    transition: all 0.3s ease;
-}
-
-.localVideo:hover {
-    transform: scale(1.05);
-    border-color: rgba(255, 255, 255, 0.8);
-    box-shadow: 0 6px 30px rgba(0, 0, 0, 0.7);
-}
-
-.localVideo .videoElement {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-.videoPlaceholderSmall {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #2a2a2a;
-}
-
-.avatarSmall {
-    width: 60px;
-    height: 60px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #25d366 0%, #20ba5a 100%);
-    color: white;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 600;
-    font-size: 18px;
-}
-
-/* Call Controls */
-.callControls {
-    position: absolute;
-    bottom: 5%;
-    left: 0;
-    right: 0;
-    padding: 24px;
-    background: linear-gradient(to top, rgba(0, 0, 0, 0.8), transparent);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 20px;
-    z-index: 10;
-}
-
-.controlButton {
-    width: 56px;
-    height: 56px;
-    border-radius: 50%;
-    border: none;
-    background: rgba(255, 255, 255, 0.2);
-    color: white;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s;
-    backdrop-filter: blur(10px);
-}
-
-.controlButton:hover {
-    background: rgba(255, 255, 255, 0.3);
-    transform: scale(1.1);
-}
-
-.controlButton:active {
-    transform: scale(0.95);
-}
-
-.controlButtonActive {
-    background: rgba(239, 68, 68, 0.3) !important;
-    border: 2px solid rgba(239, 68, 68, 0.5);
-}
-
-.controlButtonActive:hover {
-    background: rgba(239, 68, 68, 0.4) !important;
-}
-
-.endCallButton {
-    background: #ef4444;
-    width: 64px;
-    height: 64px;
-}
-
-.endCallButton:hover {
-    background: #dc2626;
-    transform: scale(1.1);
-}
-
-/* Responsive Design - Tablet */
-@media (max-width: 1024px) {
-    .callHeader {
-        padding: 14px 18px;
-    }
-
-
-
-
-    .callInfo {
-        gap: 10px;
-    }
-
-    .callAvatar {
-        width: 44px;
-        height: 44px;
-        font-size: 17px;
-    }
-
-    .callName {
-        font-size: 17px;
-    }
-
-    .callStatus {
-        font-size: 13px;
-    }
-
-    .avatarLarge {
-        width: 110px;
-        height: 110px;
-        font-size: 44px;
-    }
-
-    .videoPlaceholderText {
-        font-size: 19px;
-    }
-
-    .localVideo {
-        width: 100%;
-        height: 80%;    
-        bottom: 90px;
-        right: 18px;
-        /* border: 1px solid blue; */
-    }
-
-    .avatarSmall {
-        width: 55px;
-        height: 55px;
-        font-size: 17px;
-    }
-
-    .callControls {
-        padding: 22px 18px;
-        gap: 18px;
-    }
-
-    .controlButton {
-        width: 52px;
-        height: 52px;
-    }
-
-    .controlButton svg {
-        width: 22px;
-        height: 22px;
-    }
-
-    .endCallButton {
-        width: 60px;
-        height: 60px;
-    }
-}
-
-/* Responsive Design - Mobile (Tablet Portrait) */
 @media (max-width: 768px) {
-    .callHeader {
-        padding: 12px 16px;
-        gap: 12px;
-        border: 2px solid blue;
-    }
-
-    .backButton {
-        width: 40px;
-        height: 40px;
-    }
-
-    .backButton svg {
-        width: 20px;
-        height: 20px;
-    }
-
-    .callInfo {
-        gap: 10px;
-    }
-
-    .callAvatar {
-        width: 40px;
-        height: 40px;
-        font-size: 16px;
-    }
-
-    .callName {
-        font-size: 16px;
-        margin-bottom: 2px;
-    }
-
-    .callStatus {
-        font-size: 12px;
-    }
-
-    .avatarLarge {
-        width: 100px;
-        height: 100px;
-        font-size: 40px;
-        border-width: 3px;
-    }
-
-    .videoPlaceholderText {
-        font-size: 18px;
-        /* border: 2px solid blue; */
-    }
-
-    .localVideo {
-        width: 100px;
-        height: 133px;
-        bottom: 80px;
-        right: 16px;
-        border-width: 2px;
-    }
-
-    .avatarSmall {
-        width: 50px;
-        height: 50px;
-        font-size: 16px;
-    }
-
-    .callControls {
-        padding: 20px 16px;
-        gap: 16px;
-    }
-
-    .controlButton {
-        width: 48px;
-        height: 48px;
-    }
-
-    .controlButton svg {
-        width: 20px;
-        height: 20px;
-    }
-
-    .endCallButton {
-        width: 56px;
-        height: 56px;
-    }
-
-    .endCallButton svg {
-        width: 22px;
-        height: 22px;
-    }
-}
-
-/* Responsive Design - Small Mobile */
-@media (max-width: 576px) {
-    .callHeader {
-        /* padding: 10px 12px; */
-        gap: 10px;
-    }
-
-    .videoArea {
-        height: 80%;
-        /* border: 1px solid blue; */
-    }
-
-    .remoteVideo {
-        width: 100%;
-        height: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        position: relative;
-    }
-
-    .videoElement {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-    }
-
-    .backButton {
-        width: 36px;
-        height: 36px;
-        margin-top: -10px;
-    }
-
-    .backButton svg {
-        width: 18px;
-        height: 18px;
-    }
-
-    .callInfo {
-        gap: 8px;
-    }
-
-    .callAvatar {
-        width: 36px;
-        height: 36px;
-        font-size: 14px;
-        border-width: 1.5px;
-    }
-
-    .callName {
-        font-size: 14px;
-        margin-bottom: 2px;
-    }
-
-    .callStatus {
-        font-size: 11px;
-    }
-
-    .avatarLarge {
-        width: 130px;
-        height: 130px;
-        font-size: 32px;
-        border-width: 3px;
-    }
-
-    .videoPlaceholderText {
-        font-size: 16px;
-    }
-
-    .videoPlaceholder {
-        gap: 12px;
-    }
-
-    .localVideo {
-        width: 100px;
-        height: 75px;
-        bottom: 70px;
-        right: 12px;
-        border-width: 2px;
-    }
-
-    .avatarSmall {
-        width: 45px;
-        height: 45px;
-        font-size: 14px;
-    }
-
-    .callControls {
-        padding: 16px 12px;
-        gap: 12px;
-        margin-bottom: 40px;
-    }
-
-    .controlButton {
-        width: 44px;
-        height: 44px;
-    }
-
-    .controlButton svg {
-        width: 18px;
-        height: 18px;
-    }
-
-    .endCallButton {
-        width: 52px;
-        height: 52px;
-    }
-
-    .endCallButton svg {
-        width: 20px;
-        height: 20px;
-    }
-}
-
-/* Responsive Design - Extra Small Mobile */
-@media (max-width: 400px) {
-    .callHeader {
-        padding: 8px 10px;
-        gap: 8px;
-    }
-
-    .backButton {
-        width: 32px;
-        height: 32px;
-    }
-
-    .backButton svg {
-        width: 16px;
-        height: 16px;
-    }
-
-    .callInfo {
-        gap: 6px;
-    }
-
-    .callAvatar {
-        width: 32px;
-        height: 32px;
-        font-size: 12px;
-    }
-
-    .callName {
-        font-size: 13px;
-    }
-
-    .callStatus {
-        font-size: 10px;
-    }
-
-    .avatarLarge {
-        width: 70px;
-        height: 70px;
-        font-size: 28px;
-    }
-
-    .videoPlaceholderText {
-        font-size: 14px;
-    }
-
-    .localVideo {
-        width: 90px;
-        height: 68px;
-        bottom: 65px;
-        right: 10px;
-    }
-
-    .avatarSmall {
-        width: 40px;
-        height: 40px;
-        font-size: 12px;
-    }
-
-    .callControls {
-        padding: 14px 10px;
-        gap: 10px;
-    }
-
-    .controlButton {
-        width: 40px;
-        height: 40px;
-    }
-
-    .controlButton svg {
-        width: 16px;
-        height: 16px;
-    }
-
-    .endCallButton {
-        width: 48px;
-        height: 48px;
-    }
-
-    .endCallButton svg {
-        width: 18px;
-        height: 18px;
-    }
-}
-
-/* Landscape Orientation for Mobile */
-@media (max-width: 768px) and (orientation: landscape) {
-    .callHeader {
-        padding: 8px 16px;
-    }
-
-    .avatarLarge {
-        width: 90px;
-        height: 90px;
-        font-size: 36px;
-    }
-
-    .videoPlaceholderText {
-        font-size: 16px;
-    }
-
-    .localVideo {
-        width: 110px;
-        height: 82px;
-        bottom: 75px;
-        right: 14px;
-    }
-
-    .callControls {
-        padding: 16px 20px;
-        gap: 14px;
-    }
-
-    .controlButton {
-        width: 46px;
-        height: 46px;
-    }
-
-    .endCallButton {
-        width: 54px;
-        height: 54px;
-    }
-}
-
-/* Large Desktop */
-@media (min-width: 1440px) {
-    .callHeader {
-        padding: 20px 24px;
-    }
-
-    .callAvatar {
-        width: 52px;
-        height: 52px;
-        font-size: 20px;
-    }
-
-    .callName {
-        font-size: 20px;
-    }
-
-    .callStatus {
-        font-size: 15px;
-    }
-
-    .avatarLarge {
-        width: 140px;
-        height: 140px;
-        font-size: 56px;
-    }
-
-    .videoPlaceholderText {
-        font-size: 22px;
-    }
-
-    .localVideo {
-        width: 180px;
-        height: 135px;
-        bottom: 110px;
-        right: 24px;
-    }
-
-    .avatarSmall {
-        width: 70px;
-        height: 70px;
-        font-size: 20px;
-    }
-
-    .callControls {
-        padding: 28px 24px;
-        gap: 24px;
-    }
-
-    .controlButton {
-        width: 60px;
-        height: 60px;
-    }
-
-    .controlButton svg {
-        width: 26px;
-        height: 26px;
-    }
-
-    .endCallButton {
-        width: 68px;
-        height: 68px;
-    }
+  .page { padding: 10px 8px 16px; }
+  .shell { height: 520px; border-radius: 10px; }
+  .local { width: 120px; right: 10px; bottom: 10px; }
+  .ctl span, .endBtn span { display: none; }
+  .ctl, .endBtn { padding: 12px; }
+  .bigAvatar { width: 88px; height: 88px; }
+  .bigTimer { font-size: 26px; }
+  .secure span { display: none; }
 }

@@ -238,6 +238,16 @@ function VideoCallingPage() {
     finish("cancelled", { note: { text: "Call cancelled.", tone: "muted" } });
   };
   const retry = () => { setNote(null); setPhase("connecting"); joinedRef.current = false; };
+  const canOpenInTab = Boolean(media.mediaError?.canOpenInTab) && window.self !== window.top;
+  const openInTab = () => {
+    // Restrictive browsers (e.g. Brave Shields) deny devices to embedded pages;
+    // the same page works standalone. Mark it so the storefront gate stays quiet here.
+    try { sessionStorage.setItem(`call_in_tab:${callId}`, "1"); } catch (e) { /* ignore */ }
+    const url = `${window.location.origin}/video/calling/page?callId=${encodeURIComponent(callId)}${returnTo ? `&return=${encodeURIComponent(returnTo)}` : ""}`;
+    const w = window.open(url, "_blank", "noopener");
+    if (w) goBack();
+    else setNote({ text: "Your browser blocked the new tab. Allow pop-ups for this site and try again.", tone: "danger" });
+  };
   const abandon = async () => {
     try { await axios.post(`${BACKEND}/api/call/failed/${callId}`, { userId: me }); } catch (e) { /* ignore */ }
     goBack();
@@ -340,7 +350,8 @@ function VideoCallingPage() {
                   )}
                   {phase === "ended" && !summary && <div className={styles.summaryText}>The session has been closed.</div>}
                   <div className={styles.summaryActions}>
-                    {phase === "failed" && !terminalRef.current && <button type="button" className={styles.btn} onClick={retry}>Try again</button>}
+                    {phase === "failed" && !terminalRef.current && canOpenInTab && <button type="button" className={styles.btn} onClick={openInTab}>Open in a new tab</button>}
+                    {phase === "failed" && !terminalRef.current && <button type="button" className={canOpenInTab ? styles.btnGhost : styles.btn} onClick={retry}>Try again</button>}
                     {phase === "failed" && <button type="button" className={styles.btnGhost} onClick={abandon}>Close</button>}
                     {phase !== "failed" && <button type="button" className={styles.btn} onClick={goBack}>{isConsultant ? "Back to dashboard" : "Back"}</button>}
                   </div>

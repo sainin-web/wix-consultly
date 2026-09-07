@@ -127,7 +127,9 @@ function TabNavigation({ children }) {
       try {
         const { data } = await axios.get(`${process.env.REACT_APP_BACKEND_HOST}/api/call/active-session/${userId}`);
         if (cancelled || !data?.hasActiveCall) return;
-        if (["accepted", "connecting", "active"].includes(data.call?.status)) {
+        let inOtherTab = false;
+        try { inOtherTab = Boolean(sessionStorage.getItem(`call_in_tab:${data.call?.callId}`)); } catch (e) { /* ignore */ }
+        if (!inOtherTab && ["accepted", "connecting", "active"].includes(data.call?.status)) {
           console.log("[CALL] consultant refresh → resuming call", data.call.callId);
           navigate(callPagePath(data.call.callId, "/consultant-dashboard"), { replace: true });
         }

@@ -40,7 +40,9 @@ export default function ActiveCallGate() {
     (async () => {
       try {
         const { data } = await axios.get(`${BACKEND}/api/call/active-session/${userId}`);
-        if (!cancelled && data?.hasActiveCall && ["accepted", "connecting", "active"].includes(data.call?.status)) {
+        let inOtherTab = false;
+        try { inOtherTab = Boolean(data?.call?.callId && sessionStorage.getItem(`call_in_tab:${data.call.callId}`)); } catch (e) { /* ignore */ }
+        if (!cancelled && !inOtherTab && data?.hasActiveCall && ["accepted", "connecting", "active"].includes(data.call?.status)) {
           console.log("[CALL] active call found after load", data.call.callId);
           setCall(data.call);
         }

@@ -341,7 +341,11 @@ class ConsultantLogin extends HTMLElement {
     );
 
     iframe.style.cssText = `width:100%; height:${defaultH}px; min-height:${defaultH}px; border:none; display:block;`;
-    iframe.allow = "camera; microphone";
+    // Delegate media + autoplay to the app iframe (calls run inside it). Restrictive
+    // browsers (e.g. Brave Shields) may still deny devices to embedded pages; the
+    // call page then offers "Open in a new tab".
+    iframe.allow = "camera; microphone; autoplay; display-capture";
+    iframe.setAttribute("allowfullscreen", "true");
 
     window.addEventListener("message", (event) => {
       if (event.data?.type === "IFRAME_HEIGHT") {

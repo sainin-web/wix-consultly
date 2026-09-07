@@ -53,6 +53,60 @@ export function describeMediaError(err, callType) {
   return { code: "join_failed", message: "Unable to connect the call. Please check your internet connection and try again." };
 }
 
+const inIframe = () => { try { return window.self !== window.top; } catch (e) { return true; } };
+const isBrave = () => Boolean(navigator.brave);
+
+/**
+ * Probe the media stack with the browser API BEFORE Agora, so the failure
+ * reason is exact: embedding policy → permission → no device → device busy.
+ * Resolves { ok:true } or { ok:false, code, message, canOpenInTab }.
+ */
+export async function probeMedia(callType) {
+  const wantVideo = callType === "video";
+  const embedded = inIframe();
+  const hint = embedded
+    ? isBrave()
+      ? " Brave blocks device access inside embedded pages by default — lower Shields for this site, or open the call in a new tab."
+      : " If this keeps happening, open the call in a new tab."
+    : "";
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    return { ok: false, code: "not_supported", message: "Your browser does not support calling. Please use a recent version of Chrome, Edge, Safari or Firefox.", canOpenInTab: embedded };
+  }
+  try {
+    const pp = document.permissionsPolicy || document.featurePolicy;
+    if (pp?.allowsFeature && (!pp.allowsFeature("microphone") || (wantVideo && !pp.allowsFeature("camera")))) {
+      return { ok: false, code: "policy_blocked", message: "This embedded page is not allowed to use the microphone or camera. Open the call in a new tab.", canOpenInTab: embedded };
+    }
+  } catch (e) { /* not supported → fall through */ }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: wantVideo ? { width: 640, height: 480 } : false });
+    stream.getTracks().forEach((t) => t.stop());
+    return { ok: true };
+  } catch (err) {
+    const name = err?.name || "";
+    if (name === "NotAllowedError" || name === "SecurityError") {
+      return { ok: false, code: "permission_denied", message: (wantVideo ? "Camera and microphone access are required for a video consultation." : "Microphone access is required to start an audio consultation.") + " Allow access in your browser settings and try again." + hint, canOpenInTab: embedded };
+    }
+    if (name === "NotFoundError" || name === "OverconstrainedError") {
+      // Video: retry audio-only so a missing camera does not kill the call.
+      if (wantVideo) {
+        try {
+          const s2 = await navigator.mediaDevices.getUserMedia({ audio: true });
+          s2.getTracks().forEach((t) => t.stop());
+          return { ok: true, warning: { code: "camera_unavailable", message: "No camera was found — continuing with audio only." } };
+        } catch (e) { /* fall through to audio error */ }
+      }
+      return { ok: false, code: "device_not_found", message: "No microphone was detected by the browser." + hint, canOpenInTab: embedded };
+    }
+    if (name === "NotReadableError" || name === "AbortError") {
+      return { ok: false, code: "device_busy", message: "Your microphone or camera is already in use by another application or tab. Close it and try again.", canOpenInTab: false };
+    }
+    return { ok: false, code: "media_failed", message: "Unable to access your microphone or camera." + hint, canOpenInTab: embedded };
+  }
+}
+
 function bindClientListeners() {
   if (listenersBound) return;
   listenersBound = true;
@@ -155,13 +209,20 @@ export const joinCall = createAsyncThunk(
       }
       await releaseLocalTracks();
 
-      // Create local media BEFORE joining so a permission failure never joins a channel.
+      // Probe with the browser API first: exact reason, and a permission failure
+      // never joins a channel.
+      const probe = await probeMedia(callType);
+      if (!probe.ok) {
+        console.error("[CALL ERROR] media probe:", probe.code);
+        return rejectWithValue(probe);
+      }
+      if (probe.warning) warning = probe.warning;
       try {
         localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
       } catch (err) {
         const d = describeMediaError(err, callType);
         console.error("[CALL ERROR] microphone:", d.code);
-        return rejectWithValue(d);
+        return rejectWithValue({ ...d, canOpenInTab: inIframe() });
       }
       if (callType === "video") {
         try {

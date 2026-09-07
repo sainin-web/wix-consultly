@@ -5492,7 +5492,8 @@ var ConsultantWidget = (() => {
             (e) => console.error("[WIDGET] iframe FAILED to load", e)
           );
           iframe.style.cssText = `width:100%; height:${defaultH}px; min-height:${defaultH}px; border:none; display:block;`;
-          iframe.allow = "camera; microphone";
+          iframe.allow = "camera; microphone; autoplay; display-capture";
+          iframe.setAttribute("allowfullscreen", "true");
           window.addEventListener("message", (event) => {
             if (event.data?.type === "IFRAME_HEIGHT") {
               if (event.source !== iframe.contentWindow) {

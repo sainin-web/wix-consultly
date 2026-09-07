@@ -62,7 +62,7 @@
   overflow: hidden;
 }
 
-.hideOnMobile { display: none !important; }
+/* .hideOnMobile only has an effect under 768px (see media query) — on desktop both panels are always visible. */
 
 /* ── Sidebar: search + list ─────────────────────────────────── */
 
@@ -638,6 +638,7 @@
 
 /* Mobile: list and window swap in place; the pane keeps a bounded height */
 @media (max-width: 768px) {
+  .hideOnMobile { display: none !important; }
   .mobileBackButton { display: inline-flex; }
   .chatLayout { height: 520px; }
 

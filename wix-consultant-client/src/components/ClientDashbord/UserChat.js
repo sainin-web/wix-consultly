@@ -237,7 +237,10 @@ const UserChat = () => {
   }, [socketMessages, clientId, consultantId, shopId, consultantOverview]);
 
   const sendChat = async (input = "") => {
-    const finalMessage = typeof input === "string" ? input : text;
+    // A non-empty string argument is an explicit message (e.g. the "Hello" request);
+    // anything else (no arg, event object, empty string) sends the typed text.
+    const finalMessage =
+      typeof input === "string" && input.trim() ? input : text;
 
     if (!finalMessage?.trim() || !clientId || !consultantId || !shopId) return;
 

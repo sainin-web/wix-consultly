@@ -3,6 +3,7 @@ const { shopModel } = require("../Modal/shopify");
 const { resolveWixInstanceFromToken } = require("../services/wixInstanceFromToken");
 const { User } = require("../Modal/userSchema");
 const { WalletHistory } = require("../Modal/walletHistory");
+const { parsePage, pageMeta } = require("../utils/paginate");
 const { CallSession } = require("../Modal/callSessions");
 const { TransactionHistroy } = require("../Modal/transactionHistroy");
 
@@ -182,13 +183,16 @@ const getUserWalletHistroy = async (req, res) => {
             });
         }
 
-        const wallet = await WalletHistory.find({
-            userId,
-            shop_id: shopId
-        })
-            .populate("userId", "fullname email")
-            .sort({ createdAt: -1 })
-            .lean();
+        // Optional server-side paging + row kind. kind=credits → credit rows that
+        // are NOT voucher purchases (those have their own list in the profile).
+        const pg = parsePage(req.query);
+        const match = { userId, shop_id: shopId };
+        if (req.query.kind === "credits") { match.direction = "credit"; match.transactionType = { $ne: "voucher_purchase" }; }
+        else if (req.query.kind === "debits") match.direction = "debit";
+
+        let q = WalletHistory.find(match).populate("userId", "fullname email").sort({ createdAt: -1 });
+        if (pg) q = q.skip(pg.skip).limit(pg.limit);
+        const [wallet, total] = await Promise.all([q.lean(), pg ? WalletHistory.countDocuments(match) : Promise.resolve(0)]);
 
         // `populate()` can return `userId: null` if the referenced user was deleted.
         const safeWallet = (wallet || []).filter(
@@ -197,7 +201,8 @@ const getUserWalletHistroy = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            data: safeWallet
+            data: safeWallet,
+            ...(pg ? { pagination: pageMeta(pg, total) } : {}),
         });
 
     } catch (error) {
@@ -238,29 +243,41 @@ const getUserConversationController = async (req, res) => {
     try {
         const { id } = req.params;
         if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ success: false, message: "Id is not valid" })
-        const conversations = await TransactionHistroy.find({
-            $or: [
-                { senderId: id },
-                { receiverId: id }
-            ]
-        })
+        // Optional server-side paging (page/limit) + type filter. Without a page
+        // param the legacy "all rows" response is returned unchanged.
+        const pg = parsePage(req.query);
+        const type = ["chat", "voice", "video"].includes(req.query.type) ? req.query.type : null;
+        const party = { $or: [{ senderId: id }, { receiverId: id }] };
+        const match = type ? { ...party, type } : party;
+
+        let q = TransactionHistroy.find(match)
             .populate("senderId", "fullname email")
             .populate("receiverId", "fullname email")
             .sort({ createdAt: -1 });
+        if (pg) q = q.skip(pg.skip).limit(pg.limit);
+
+        const oid = new mongoose.Types.ObjectId(id);
+        const [conversations, total, summaryRows] = await Promise.all([
+            q,
+            pg ? TransactionHistroy.countDocuments(match) : Promise.resolve(0),
+            // Per-type totals over ALL of the user's sessions (the tiles must not depend on the page).
+            pg ? TransactionHistroy.aggregate([
+                { $match: { $or: [{ senderId: oid }, { receiverId: oid }] } },
+                { $group: { _id: "$type", count: { $sum: 1 }, amount: { $sum: { $convert: { input: "$amount", to: "double", onError: 0, onNull: 0 } } } } },
+            ]) : Promise.resolve([]),
+        ]);
 
         const final = conversations.map(c => {
-            const consultant =
-                c.senderId._id.toString() === id
-                    ? c.receiverId
-                    : c.senderId;
-
-            return {
-                ...c.toObject(),
-                consultant
-            };
+            const sender = c.senderId; const receiver = c.receiverId;
+            const consultant = sender && sender._id && sender._id.toString() === id ? receiver : sender;
+            return { ...c.toObject(), consultant };
         });
 
-        res.json({ success: true, data: final });
+        if (!pg) return res.json({ success: true, data: final });
+
+        const summary = { chat: { count: 0, amount: 0 }, voice: { count: 0, amount: 0 }, video: { count: 0, amount: 0 } };
+        for (const r of summaryRows) if (summary[r._id]) summary[r._id] = { count: r.count, amount: Math.round(r.amount * 100) / 100 };
+        res.json({ success: true, data: final, pagination: pageMeta(pg, total), summary });
 
     } catch (error) {
         return res.status(500).send({ success: false, message: "Somthing went wrong " })

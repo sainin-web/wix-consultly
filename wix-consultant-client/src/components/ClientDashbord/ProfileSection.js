@@ -42,6 +42,24 @@ const TYPE_META = {
 
 const CREDIT_TYPES = new Set(["recharge", "bonus", "credit", "manual_credit", "refund"]);
 const PENDING_KEY = "consultly_pending_purchase";
+const PAGE_SIZE = 10;
+
+/** Compact server-side pager: "1–10 of 42" + Prev / Next. Hidden for a single page. */
+function Pager({ meta, onPage, busy }) {
+  if (!meta || meta.totalPages <= 1) return null;
+  const from = (meta.page - 1) * meta.limit + 1;
+  const to = Math.min(meta.total, meta.page * meta.limit);
+  return (
+    <nav className={styles.pager} aria-label="Pagination">
+      <span className={styles.pagerInfo}>{from}–{to} of {meta.total}</span>
+      <div className={styles.pagerBtns}>
+        <button type="button" className={styles.pagerBtn} onClick={() => onPage(meta.page - 1)} disabled={busy || meta.page <= 1} aria-label="Previous page">‹ Prev</button>
+        <span className={styles.pagerPage}>{meta.page} / {meta.totalPages}</span>
+        <button type="button" className={styles.pagerBtn} onClick={() => onPage(meta.page + 1)} disabled={busy || !meta.hasMore} aria-label="Next page">Next ›</button>
+      </div>
+    </nav>
+  );
+}
 const POLL_MS = 3000;
 const POLL_MAX_MS = 30 * 60 * 1000;
 
@@ -189,27 +207,30 @@ function purchaseTone(status) {
  *     marks it PAID (credits added server-side) / FAILED / CANCELLED.
  * Nothing here ever adds credits or trusts a redirect.
  */
-function VoucherStore({ token, voucherData, currency, balance, walletRows, walletState, onWalletChanged }) {
+function VoucherStore({ token, voucherData, currency, balance, walletRows, walletState, walletMeta, onWalletPage, onWalletChanged }) {
   const [flow, setFlow] = useState({ state: "idle" }); // idle|creating|awaiting|paid|failed|cancelled|error
   const [history, setHistory] = useState([]);
+  const [historyMeta, setHistoryMeta] = useState(null);
+  const [historyPage, setHistoryPage] = useState(1);
   const [historyState, setHistoryState] = useState("idle");
   const pollRef = React.useRef(null);
   const tabRef = React.useRef(null);
 
-  const loadHistory = useCallback(async () => {
+  const loadHistory = useCallback(async (page = historyPage) => {
     if (!token) { setHistoryState("noauth"); return; }
     setHistoryState((s) => (s === "ready" ? s : "loading"));
     try {
-      const { data } = await axios.get(`${BACKEND}/api/vouchers/purchases`, authHeaders(token));
+      const { data } = await axios.get(`${BACKEND}/api/vouchers/purchases`, { ...authHeaders(token), params: { page, limit: PAGE_SIZE } });
       setHistory(Array.isArray(data?.purchases) ? data.purchases : []);
+      setHistoryMeta(data?.pagination || null);
       setHistoryState("ready");
     } catch (err) {
       console.error("[VOUCHER] history failed:", err.response?.data?.message || err.message);
       setHistoryState(err.response?.status === 401 ? "noauth" : "error");
     }
-  }, [token]);
+  }, [token, historyPage]);
 
-  useEffect(() => { loadHistory(); }, [loadHistory]);
+  useEffect(() => { loadHistory(historyPage); }, [loadHistory, historyPage]);
 
   const stopPolling = useCallback(() => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } }, []);
 
@@ -225,7 +246,8 @@ function VoucherStore({ token, voucherData, currency, balance, walletRows, walle
     } else {
       setFlow({ state: "cancelled", purchase });
     }
-    loadHistory();
+    setHistoryPage(1);
+    loadHistory(1);
   }, [stopPolling, onWalletChanged, loadHistory]);
 
   const startPolling = useCallback((purchaseId, checkoutUrl, startedAt = Date.now()) => {
@@ -401,6 +423,7 @@ function VoucherStore({ token, voucherData, currency, balance, walletRows, walle
             ))}
           </ul>
         )}
+        {historyState === "ready" && <Pager meta={historyMeta} onPage={setHistoryPage} />}
       </section>
 
       {/* Other wallet credits (manual/bonus) — only when any exist */}
@@ -425,6 +448,7 @@ function VoucherStore({ token, voucherData, currency, balance, walletRows, walle
               </li>
             ))}
           </ul>
+          <Pager meta={walletMeta} onPage={onWalletPage} />
         </section>
       )}
     </div>
@@ -447,6 +471,11 @@ const ProfileSection = () => {
   const [typeFilter, setTypeFilter] = useState("all");
   const [sessions, setSessions] = useState([]);
   const [sessionsState, setSessionsState] = useState("idle"); // idle|loading|ready|error
+  const [sessionsPage, setSessionsPage] = useState(1);
+  const [sessionsMeta, setSessionsMeta] = useState(null);
+  const [usageSummary, setUsageSummary] = useState(null);
+  const [walletPage, setWalletPage] = useState(1);
+  const [walletMeta, setWalletMeta] = useState(null);
   const [wallet, setWallet] = useState([]);
   const [walletState, setWalletState] = useState("idle");
 
@@ -489,13 +518,15 @@ const ProfileSection = () => {
     let cancelled = false;
     setSessionsState("loading");
     axios
-      .get(`${BACKEND}/api/users/find-user-logs-history/${userId}`)
+      .get(`${BACKEND}/api/users/find-user-logs-history/${userId}`, { params: { page: sessionsPage, limit: PAGE_SIZE, ...(typeFilter !== "all" ? { type: typeFilter } : {}) } })
       .then((res) => {
         if (cancelled) return;
         const rows = Array.isArray(res.data?.data) ? res.data.data : [];
         setSessions(rows);
+        setSessionsMeta(res.data?.pagination || null);
+        if (res.data?.summary) setUsageSummary(res.data.summary);
         setSessionsState("ready");
-        log("Consultation history loaded", { count: rows.length });
+        log("Consultation history loaded", { page: sessionsPage, count: rows.length, total: res.data?.pagination?.total });
       })
       .catch((err) => {
         if (cancelled) return;
@@ -504,7 +535,7 @@ const ProfileSection = () => {
         setSessionsState("error");
       });
     return () => { cancelled = true; };
-  }, [userId]);
+  }, [userId, sessionsPage, typeFilter]);
 
   const [walletTick, setWalletTick] = useState(0);
   const refreshWallet = useCallback(() => {
@@ -518,11 +549,12 @@ const ProfileSection = () => {
     let cancelled = false;
     setWalletState("loading");
     axios
-      .get(`${BACKEND}/api/users/get/wallet-history/${userId}/${shopId}`)
+      .get(`${BACKEND}/api/users/get/wallet-history/${userId}/${shopId}`, { params: { kind: "credits", page: walletPage, limit: PAGE_SIZE } })
       .then((res) => {
         if (cancelled) return;
         const rows = Array.isArray(res.data?.data) ? res.data.data : [];
         setWallet(rows);
+        setWalletMeta(res.data?.pagination || null);
         setWalletState("ready");
         log("Wallet history loaded", { count: rows.length });
       })
@@ -534,7 +566,7 @@ const ProfileSection = () => {
       });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, shopId, walletTick]);
+  }, [userId, shopId, walletTick, walletPage]);
 
   // Purchases live in <VoucherStore/> (server-verified Wix checkout + webhook).
 
@@ -555,25 +587,16 @@ const ProfileSection = () => {
   // Per-type usage from real session records. There are no separate
   // chat/audio/video credit buckets in the schema — the wallet is a single
   // balance — so these tiles show what has been spent on each channel.
-  const usage = useMemo(() => {
-    const acc = {
-      chat: { count: 0, amount: 0 },
-      voice: { count: 0, amount: 0 },
-      video: { count: 0, amount: 0 },
-    };
-    for (const s of sessions) {
-      const t = acc[s.type];
-      if (!t) continue;
-      t.count += 1;
-      t.amount += Number(s.amount) || 0;
-    }
-    return acc;
-  }, [sessions]);
+  // Totals come from the server (aggregated over every session), so they do
+  // not depend on which page is loaded.
+  const usage = useMemo(() => usageSummary || {
+    chat: { count: 0, amount: 0 },
+    voice: { count: 0, amount: 0 },
+    video: { count: 0, amount: 0 },
+  }, [usageSummary]);
 
-  const visibleSessions = useMemo(
-    () => (typeFilter === "all" ? sessions : sessions.filter((s) => s.type === typeFilter)),
-    [sessions, typeFilter],
-  );
+  // Filtering is server-side now (type param); the page holds one filtered page.
+  const visibleSessions = sessions;
 
 
 
@@ -682,7 +705,7 @@ const ProfileSection = () => {
                   type="button"
                   className={`${styles.chip} ${typeFilter === k ? styles.chipActive : ""}`}
                   aria-pressed={typeFilter === k}
-                  onClick={() => setTypeFilter(k)}
+                  onClick={() => { setTypeFilter(k); setSessionsPage(1); }}
                 >
                   {l}
                 </button>
@@ -739,6 +762,7 @@ const ProfileSection = () => {
               })}
             </ul>
           )}
+          {sessionsState === "ready" && <Pager meta={sessionsMeta} onPage={setSessionsPage} />}
         </section>
       )}
 
@@ -751,6 +775,8 @@ const ProfileSection = () => {
           balance={balance}
           walletRows={wallet}
           walletState={walletState}
+          walletMeta={walletMeta}
+          onWalletPage={setWalletPage}
           onWalletChanged={refreshWallet}
         />
       )}

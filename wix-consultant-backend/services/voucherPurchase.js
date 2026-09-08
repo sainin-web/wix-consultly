@@ -307,9 +307,18 @@ async function getForUser({ user, purchaseId }) {
   return p ? publicView(p) : null;
 }
 
-async function listForUser({ user, limit = 50 }) {
-  const rows = await VoucherPurchase.find({ userId: user._id, status: { $ne: "PROCESSING" } }).sort({ createdAt: -1 }).limit(limit);
-  return rows.map(publicView);
+async function listForUser({ user, limit = 50, page = null }) {
+  const match = { userId: user._id, status: { $ne: "PROCESSING" } };
+  if (!page) {
+    const rows = await VoucherPurchase.find(match).sort({ createdAt: -1 }).limit(limit);
+    return { rows: rows.map(publicView), pagination: null };
+  }
+  const [rows, total] = await Promise.all([
+    VoucherPurchase.find(match).sort({ createdAt: -1 }).skip(page.skip).limit(page.limit),
+    VoucherPurchase.countDocuments(match),
+  ]);
+  const totalPages = Math.max(1, Math.ceil(total / page.limit));
+  return { rows: rows.map(publicView), pagination: { page: page.page, limit: page.limit, total, totalPages, hasMore: page.page < totalPages } };
 }
 
 /** User closed the checkout: mark CANCELLED (a later PAID webhook still credits — see finalizePaid). */

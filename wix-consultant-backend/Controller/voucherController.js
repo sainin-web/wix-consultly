@@ -1,4 +1,5 @@
 const svc = require("../services/voucherPurchase");
+const { parsePage } = require("../utils/paginate");
 
 /**
  * POST /api/vouchers/purchase          { voucherId }        → { purchaseId, checkoutUrl }
@@ -45,8 +46,8 @@ const cancelPurchase = async (req, res) => {
 
 const listPurchases = async (req, res) => {
   try {
-    const rows = await svc.listForUser({ user: req.user });
-    return res.status(200).json({ success: true, purchases: rows, walletBalance: Number(req.user.walletBalance) || 0 });
+    const { rows, pagination } = await svc.listForUser({ user: req.user, page: parsePage(req.query) });
+    return res.status(200).json({ success: true, purchases: rows, pagination, walletBalance: Number(req.user.walletBalance) || 0 });
   } catch (e) {
     return res.status(500).json({ success: false, message: "Server error" });
   }

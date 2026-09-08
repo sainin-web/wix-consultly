@@ -1,33 +1,51 @@
 /* ============================================================
    STOREFRONT DESIGN TOKENS — single source
    ------------------------------------------------------------
-   Shared by the public storefront surfaces (navbar, home, customer
-   profile). Declared on each root class rather than :root so they
-   cannot leak into the consultant dashboard or admin pages.
+   Shared by the public storefront surfaces (navbar, home, consultant
+   profile, customer profile, chat). Declared on each root class rather
+   than :root so they cannot leak into the consultant dashboard or admin.
+
+   Palette: one accent (blue), neutral slate greys, green reserved for
+   availability only.
    ============================================================ */
 
 .storefront-nav,
 .consultant-home,
+.sf-home,
+.sf-profile,
 .customer-profile,
 .customer-chat {
-  --sf-accent: #ff6b35;
-  --sf-accent-strong: #e85d28;
-  --sf-accent-soft: #fff4f0;
-  --sf-ink: #101828;
-  --sf-ink-2: #475467;
-  --sf-muted: #667085;
-  --sf-line: #e7eaee;
-  --sf-line-soft: #f1f3f5;
+  --sf-accent: #2563eb;
+  --sf-accent-strong: #1d4ed8;
+  --sf-accent-soft: #eff6ff;
+  --sf-accent-ring: rgba(37, 99, 235, 0.18);
+
+  --sf-ink: #0f172a;
+  --sf-ink-2: #334155;
+  --sf-muted: #64748b;
+  --sf-subtle: #94a3b8;
+
+  --sf-line: #e2e8f0;
+  --sf-line-soft: #f1f5f9;
   --sf-surface: #ffffff;
-  --sf-surface-2: #f8f9fb;
-  --sf-success-ink: #067647;
-  --sf-success-bg: #ecfdf3;
-  --sf-warn-ink: #b54708;
-  --sf-warn-bg: #fffaeb;
-  --sf-danger-ink: #b42318;
-  --sf-danger-bg: #fef3f2;
-  --sf-radius-card: 14px;
-  --sf-radius-ctl: 10px;
+  --sf-surface-2: #f8fafc;
+  --sf-surface-3: #f1f5f9;
+
+  --sf-success-ink: #15803d;
+  --sf-success: #16a34a;
+  --sf-success-bg: #f0fdf4;
+  --sf-warn-ink: #b45309;
+  --sf-warn-bg: #fffbeb;
+  --sf-danger-ink: #b91c1c;
+  --sf-danger-bg: #fef2f2;
+
+  --sf-radius-card: 12px;
+  --sf-radius-ctl: 8px;
+  --sf-radius-pill: 999px;
+
+  --sf-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --sf-shadow-md: 0 8px 24px -12px rgba(15, 23, 42, 0.18);
+
   --sf-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
 }

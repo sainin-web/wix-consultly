@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import "bootstrap/dist/css/bootstrap.min.css";
-import "../../components/ConsultantCards/ConsultantCards.css";
+import "../../css/storefront-tokens.css";
+import "./storefront.css";
 import { useDispatch, useSelector } from "react-redux";
 import { fetchConsultantById } from "../Redux/slices/ConsultantSlices";
 import { checkUserBalance, openCallPage } from "../middle-ware/OpenCallingPage";
@@ -9,7 +9,13 @@ import { reserveCallTab, navigateCallTab, closeReservedTab } from "../../utils/c
 import { fetchVoucherData } from "../Redux/slices/UserSlices";
 import { useWixUser } from "../../useContext/WixUserContext";
 import { getCustomerId } from "../../utils/wixStorage";
+import ConsultationSelector from "./ConsultationSelector";
+import { Avatar, StatusBadge, Dialog, Icon, availabilityOf, parseLanguages, splitTags } from "./Shared";
 
+/*
+ * Consultant profile page. Data + chat/call flows are the existing ones;
+ * the layout is a hero band, readable content column and one selector panel.
+ */
 function ViewProfile() {
   const dispatch = useDispatch();
   const { user } = useWixUser();
@@ -17,389 +23,154 @@ function ViewProfile() {
   const { shop_id, consultant_id } = useParams();
   const navigate = useNavigate();
 
-  const { consultantOverview, loading } = useSelector(
-    (state) => state.consultants,
-  );
+  const { consultantOverview, loading } = useSelector((state) => state.consultants);
   const { voucherData } = useSelector((state) => state.users);
+
   useEffect(() => {
-    dispatch(
-      fetchConsultantById({ shop_id: shop_id, consultant_id: consultant_id }),
-    );
+    dispatch(fetchConsultantById({ shop_id, consultant_id }));
     dispatch(fetchVoucherData(shop_id));
   }, [dispatch, shop_id, consultant_id]);
 
-  useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
-  }, []);
+  useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: "auto" }); }, []);
 
-  const consultantView = consultantOverview?.consultant;
-  const imageUrl = `${process.env.REACT_APP_BACKEND_HOST}/${consultantView?.profileImage?.replace("\\", "/")}`;
-
+  const c = consultantOverview?.consultant;
   const [callError, setCallError] = useState("");
+  const [loginPrompt, setLoginPrompt] = useState(false);
+
+  const instanceQ = (() => {
+    const instance = new URLSearchParams(window.location.search).get("instance") || localStorage.getItem("wix_instance");
+    return instance ? `?instance=${encodeURIComponent(instance)}` : "";
+  })();
+
+  /* ── existing flows (unchanged apart from a login dialog instead of a silent return) ── */
   const startCall = async ({ receiverId, type }) => {
-    if (!userId) return;
+    if (!userId) { setLoginPrompt(true); return; }
     const tab = reserveCallTab("user", userId); // synchronously in the click (popup blockers)
     if (!tab) { setCallError("Your browser blocked the call window. Allow pop-ups for this site and try again."); return; }
     const result = await openCallPage({ receiverId, type, userId, shop: shop_id, storeUrl: shop_id });
     if (result?.ok) { navigateCallTab(tab, { callId: result.callId, as: "user", uid: userId }); return; }
     closeReservedTab(tab);
+    if (result?.code === "login_required") { setLoginPrompt(true); return; }
     setCallError(result?.message || "Call could not be started. Please try again.");
   };
 
   const startChat = async (consultantId) => {
-    if (!userId) return;
-    const balance = await checkUserBalance({
-      userId,
-      consultantId,
-      type: "chat",
-      shop: shop_id,
-    });
-    if (balance?.requiresLogin) return;
-    const instance =
-      new URLSearchParams(window.location.search).get("instance") ||
-      localStorage.getItem("wix_instance");
-    const q = instance ? `?instance=${encodeURIComponent(instance)}` : "";
-    navigate(`/chats/${consultantId}${q}`);
+    if (!userId) { setLoginPrompt(true); return; }
+    const balance = await checkUserBalance({ userId, consultantId, type: "chat", shop: shop_id });
+    if (balance?.requiresLogin) { setLoginPrompt(true); return; }
+    navigate(`/chats/${consultantId}${instanceQ}`);
   };
-  const backToHome = () => {
-    const instance =
-      new URLSearchParams(window.location.search).get("instance") ||
-      localStorage.getItem("wix_instance");
-    const q = instance ? `?instance=${encodeURIComponent(instance)}` : "";
-    navigate(`/consultant/card${q}`);
+
+  const backToHome = () => navigate(`/consultant/card${instanceQ}`);
+
+  const onStart = (kind) => {
+    if (!c?._id) return;
+    if (kind === "chat") startChat(c._id);
+    else startCall({ receiverId: c._id, type: kind });
   };
+
+  /* ── derived display data ─────────────────────────────────── */
+  const currency = voucherData?.shopCurrency || "";
+  const name = c?.displayName || c?.fullname || "Consultant";
+  const languages = useMemo(() => parseLanguages(c?.language), [c]);
+  const tags = useMemo(() => splitTags(c?.specialization), [c]);
+  const status = availabilityOf({ isBusy: c?.isBusy, isActive: c?.isActive });
+  const prices = {
+    chat: `${currency}${parseInt(c?.chatPerMinute, 10) || 0}`,
+    voice: `${currency}${parseInt(c?.voicePerMinute, 10) || 0}`,
+    video: `${currency}${parseInt(c?.videoPerMinute, 10) || 0}`,
+  };
+  const bio = String(c?.bio || "").trim();
+  const paragraphs = bio ? bio.split(/\n{2,}|\r\n\r\n/).map((p) => p.trim()).filter(Boolean) : [];
+
+  if (loading || !c) {
+    return (
+      <div className="sf-profile">
+        <div className="sf-profile__inner">
+          <div className="sf-skeleton-row"><span /><span /></div>
+          <div className="sf-hero sf-hero--skeleton" aria-busy="true" />
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="view-profile-container">
-      {callError && (
-        <div className="cc-modal" role="alertdialog" aria-modal="true" aria-labelledby="vp-call-err">
-          <div className="cc-modal__panel">
-            <h2 className="cc-modal__title" id="vp-call-err">Unable to start the call</h2>
-            <p className="cc-modal__text">{callError}</p>
-            <div className="cc-modal__actions">
-              <button type="button" className="cc-modal__btn cc-modal__btn--primary" onClick={() => setCallError("")}>OK</button>
-            </div>
-          </div>
-        </div>
+    <div className="sf-profile">
+      {loginPrompt && (
+        <Dialog
+          labelledBy="sf-vp-login"
+          icon="lock"
+          title="Sign in to continue"
+          text="You need to be logged in to start a consultation. Please log in and try again."
+          actions={<>
+            <button type="button" className="sf-btn sf-btn--ghost" onClick={() => setLoginPrompt(false)}>Cancel</button>
+            <button type="button" className="sf-btn sf-btn--primary" onClick={() => navigate("/login")}>Login</button>
+          </>}
+        />
       )}
-      <div className="container py-4">
-        {/* Back Button */}
-        <button
-          className="btn btn-link back-button mb-3"
-          onClick={() => backToHome()}
-        >
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            style={{ marginRight: "8px", verticalAlign: "middle" }}
-          >
-            <path d="M19 12H5M12 19l-7-7 7-7" />
-          </svg>
-          Back to Consultants
+      {callError && (
+        <Dialog
+          labelledBy="sf-vp-call-err"
+          title="Unable to start the call"
+          text={callError}
+          actions={<button type="button" className="sf-btn sf-btn--primary" onClick={() => setCallError("")}>OK</button>}
+        />
+      )}
+
+      <div className="sf-profile__inner">
+        <button type="button" className="sf-back" onClick={backToHome}>
+          <Icon name="back" size={16} /> All consultants
         </button>
 
-        {/* Profile Header */}
-        <div className="card shadow-sm border-0 mb-4 profile-header-card">
-          <div className="card-body p-4">
-            {/* Profile Section */}
-            <div className="flex align-items-start mb-3">
-              {/* Profile Image */}
-              <div className="me-4 position-relative flex-shrink-0">
-                <img
-                  src={imageUrl || "/images/flag/teamdefault.png"}
-                  alt={consultantView?.fullname}
-                  className="rounded-circle profile-image profile-image-large"
-                  onError={(e) => {
-                    e.target.src = "/images/flag/teamdefault.png";
-                  }}
-                />
-                {consultantView?.isActive && (
-                  <span className="active-status-dot active-status-dot-large"></span>
-                )}
-              </div>
-
-              {/* Name and Details */}
-              <div className="flex-grow-1">
-                <div className="flex align-items-center gap-2 mb-3">
-                  <h5 className="card-title mb-0 fw-bold consultant-name consultant-name-large">
-                    {consultantView?.fullname}
-                  </h5>
-                  <span className="experience-badge experience-badge-large">
-                    {consultantView?.experience}+ Years of Experience
-                  </span>
-                </div>
-                <p className="mb-3 consultant-profession consultant-profession-large">
-                  {consultantView?.profession} -{" "}
-                  {consultantView?.specialization}
-                </p>
-              </div>
+        {/* Hero band: who is this? */}
+        <section className="sf-hero" aria-label="Consultant">
+          <Avatar src={c.profileImage} name={name} size={96} status={status.key} className="sf-hero__avatar" />
+          <div className="sf-hero__body">
+            <div className="sf-hero__line">
+              <h1 className="sf-hero__name">{name}</h1>
+              <StatusBadge status={status} />
             </div>
-
-            <hr className="card-divider my-2" />
-
-            <div className="mb-0">
-              <p className="mb-2 consultant-info">
-                <strong className="ml-2">Speaks:</strong>
-                {consultantView?.language?.map((lang) => {
-                  return <span key={lang}>{lang} , </span>;
-                })}
-              </p>
-              <div className="mb-0">
-                <strong className="consultant-info d-block mb-2">
-                  Calling Options:
-                </strong>
-                <div className="calling-options">
-                  <button
-                    className="calling-option-btn chat-btn border-0"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      startChat(consultantView?._id);
-                      // navigate(`/user-chat/${consultantView?._id}`);
-                    }}
-                  >
-                    <div className="calling-option-content">
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        xmlns="http://www.w3.org/2000/svg"
-                      >
-                        <path
-                          d="M20 2H4C2.9 2 2 2.9 2 4V22L6 18H20C21.1 18 22 17.1 22 16V4C22 2.9 21.1 2 20 2Z"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                      <span className="calling-option-label">Chat</span>
-                    </div>
-                    <span className="calling-option-price">
-                      {voucherData?.shopCurrency}
-                      {consultantView?.chatPerMinute}{" "}
-                    </span>
-                  </button>
-                  <button
-                    className="calling-option-btn audio-btn"
-                    onClick={(e) => {
-                      startCall({
-                        receiverId: consultantView?._id,
-                        type: "voice",
-                      });
-                    }}
-                  >
-                    <div className="calling-option-content">
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="lucide lucide-phone-icon lucide-phone"
-                      >
-                        <path d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384" />
-                      </svg>
-                      <span className="calling-option-label">Voice Call</span>
-                    </div>
-                    <span className="calling-option-price">
-                      {voucherData?.shopCurrency}
-                      {consultantView?.voicePerMinute}
-                    </span>
-                  </button>
-                  <button
-                    className="calling-option-btn video-btn"
-                    onClick={(e) => {
-                      startCall({
-                        receiverId: consultantView?._id,
-                        type: "video",
-                      });
-                    }}
-                  >
-                    <div className="calling-option-content">
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        xmlns="http://www.w3.org/2000/svg"
-                      >
-                        <path
-                          d="M23 7L16 12L23 17V7Z"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                        <path
-                          d="M14 5H3C1.9 5 1 5.9 1 7V17C1 18.1 1.9 19 3 19H14C15.1 19 16 18.1 16 17V7C16 5.9 15.1 5 14 5Z"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                      <span className="calling-option-label">Video</span>
-                    </div>
-                    <span className="calling-option-price">
-                      {voucherData?.shopCurrency}
-                      {consultantView?.videoPerMinute}
-                    </span>
-                  </button>
-                </div>
-              </div>
-            </div>
+            <p className="sf-hero__role">{c.profession || "Consultant"}{c.specialization ? ` · ${c.specialization}` : ""}</p>
+            <ul className="sf-hero__facts">
+              <li><Icon name="briefcase" size={15} /><span><strong>{parseInt(c.experience, 10) || 0}+ years</strong> of experience</span></li>
+              {languages.length > 0 && <li><Icon name="globe" size={15} /><span>Speaks <strong>{languages.join(", ")}</strong></span></li>}
+              <li><Icon name="chat" size={15} /><span>Chat, audio and video</span></li>
+            </ul>
           </div>
-        </div>
+        </section>
 
-        <div className="row">
-          {/* Left Column */}
-          <div className="col-lg-8">
-            {/* About Section */}
-            <div className="card shadow-sm border-0 mb-4">
-              <div className="card-body p-4">
-                <h3 className="section-title mb-3">About</h3>
-                <p className="about-text">
-                  {
-                    "An astrologer is a practitioner who studies the positions and movements of celestial bodies to offer insights into human life, personality traits, and future events. They often use tools like horoscopes and birth charts to analyze how the sun, moon, and planets influence an individual's fate. While considered a pseudoscience by the scientific community, many people seek astrologers for guidance, comfort, and self-reflection. "
-                  }
-                </p>
-              </div>
-            </div>
+        <div className="sf-profile__cols">
+          {/* Content column: plain typography, no boxes */}
+          <div className="sf-profile__main">
+            <section className="sf-section">
+              <h2 className="sf-section__title">About</h2>
+              {paragraphs.length > 0 ? (
+                paragraphs.map((p, i) => <p key={i} className="sf-prose">{p}</p>)
+              ) : (
+                <p className="sf-prose sf-prose--muted">{name} has not added a biography yet.</p>
+              )}
+            </section>
 
-            {/* Education & Certifications */}
-            {/* <div className="card shadow-sm border-0 mb-4">
-                            <div className="card-body p-4">
-                                <h3 className="section-title mb-3">Education & Certifications</h3>
-                                <div className="mb-3">
-                                    <h5 className="subsection-title">Education</h5>
-                                    <p className="info-text">{consultant.education}</p>
-                                </div>
-                                <div>
-                                    <h5 className="subsection-title">Certifications</h5>
-                                    <ul className="certifications-list">
-                                        {consultant.certifications.map((cert, index) => (
-                                            <li key={index}>{cert}</li>
-                                        ))}
-                                    </ul>
-                                </div>
-                            </div>
-                        </div> */}
+            {tags.length > 0 && (
+              <section className="sf-section">
+                <h2 className="sf-section__title">Expertise</h2>
+                <div className="sf-tags">{tags.map((t) => <span key={t} className="sf-tag sf-tag--lg">{t}</span>)}</div>
+              </section>
+            )}
+
+            <section className="sf-section">
+              <h2 className="sf-section__title">How it works</h2>
+              <ol className="sf-steps">
+                <li><span>1</span><div><strong>Choose a format</strong><p>Chat, audio or video, priced per minute.</p></div></li>
+                <li><span>2</span><div><strong>Send your request</strong><p>The consultant accepts and you're connected.</p></div></li>
+                <li><span>3</span><div><strong>Pay as you go</strong><p>Time is billed from your wallet only while connected.</p></div></li>
+              </ol>
+            </section>
           </div>
 
-          {/* Right Column */}
-          <div className="col-lg-4">
-            {/* Expertise Tags */}
-            {/* <div className="card shadow-sm border-0 mb-4">
-                            <div className="card-body p-4">
-                                <h3 className="section-title mb-3">Expertise</h3>
-                                <div className="expertise-tags">
-                                    {consultant.expertise.map((tag, index) => (
-                                        <span key={index} className="expertise-tag">
-                                            {tag}
-                                        </span>
-                                    ))}
-                                </div>
-                            </div>
-                        </div> */}
-
-            {/* Calling Options */}
-            <div className="card shadow-sm border-0">
-              <div className="card-body p-4">
-                <h3 className="section-title mb-3">Calling Options</h3>
-                <div className="calling-options-profile-sidebar">
-                  <button
-                    className="calling-option-btn chat-btn"
-                    onClick={() => startChat(consultantView?._id)}
-                    title={`Chat - ${voucherData?.shopCurrency} ${consultantView?.chatPerMinute}`}
-                  >
-                    <svg
-                      width="24"
-                      height="24"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                    >
-                      <path
-                        d="M20 2H4C2.9 2 2 2.9 2 4V22L6 18H20C21.1 18 22 17.1 22 16V4C22 2.9 21.1 2 20 2Z"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </button>
-                  <button
-                    className="calling-option-btn audio-btn"
-                    onClick={() =>
-                      startCall({
-                        receiverId: consultantView?._id,
-                        type: "voice",
-                      })
-                    }
-                    title={`Audio Call - ${voucherData?.shopCurrency} ${consultantView?.voicePerMinute}`}
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="24"
-                      height="24"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="lucide lucide-phone-icon lucide-phone"
-                    >
-                      <path d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384" />
-                    </svg>
-                  </button>
-                  <button
-                    className="calling-option-btn video-btn"
-                    onClick={() =>
-                      startCall({
-                        receiverId: consultantView?._id,
-                        type: "video",
-                      })
-                    }
-                    title={`Video Call - ${voucherData?.shopCurrency} ${consultantView?.videoPerMinute}`}
-                  >
-                    <svg
-                      width="24"
-                      height="24"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                    >
-                      <path
-                        d="M23 7L16 12L23 17V7Z"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                      <path
-                        d="M14 5H3C1.9 5 1 5.9 1 7V17C1 18.1 1.9 19 3 19H14C15.1 19 16 18.1 16 17V7C16 5.9 15.1 5 14 5Z"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            </div>
+          {/* The one panel on the page */}
+          <div className="sf-profile__side">
+            <ConsultationSelector prices={prices} status={status} signedIn={Boolean(userId)} onStart={onStart} />
           </div>
         </div>
       </div>

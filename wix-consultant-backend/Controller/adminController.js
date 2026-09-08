@@ -298,12 +298,23 @@ const voucherController = async (req, res) => {
 
     const productName = String(req.body.name || "").trim() || `${totalCoin} Coins Voucher`;
     const productDescription = `Get ${totalCoin} coins + ${extraCoin} bonus coins`;
-    const created = await wixCatalog.createVoucherProduct({ token, version: catalogVersion, name: productName, description: productDescription, price });
+    let created;
+    try {
+      created = await wixCatalog.createVoucherProduct({ token, version: catalogVersion, name: productName, description: productDescription, price });
+    } catch (createError) {
+      if (createError.code && createError.productId) {
+        // Product exists but failed read-back verification: do not keep a broken product.
+        console.error("[VOUCHER CREATE] Product created but NOT purchasable — deleting it", { productId: createError.productId, code: createError.code, detail: createError.detail });
+        try { await wixCatalog.deleteVoucherProduct({ token, version: catalogVersion, productId: createError.productId }); } catch (e) { console.error("[VOUCHER CREATE] cleanup failed", wixCatalog.wixErrorInfo(e)); }
+        return res.status(502).json({ success: false, code: createError.code, message: `Wix created the product but it is not purchasable: ${createError.detail}` });
+      }
+      throw createError;
+    }
     if (!created.productId) {
       console.error("[VOUCHER CREATE] Wix API returned no product id — voucher NOT saved");
       return res.status(502).json({ success: false, message: "Wix did not return a product id" });
     }
-    console.log("[VOUCHER CREATE] Wix product created:", created.productId, { catalog: catalogVersion, variantId: created.variantId || null });
+    console.log("[VOUCHER CREATE] Wix product created:", created.productId, { catalog: catalogVersion, variantId: created.variantId || null, wixPrice: created.price ?? null, currency: created.currency ?? null, availability: created.availability ?? null });
 
     const voucher = {
       voucherCode: voucherCode || "",
@@ -388,6 +399,50 @@ const voucherController = async (req, res) => {
     });
   }
 };
+/**
+ * PUT /api/admin/admin/voucher-repair/:shopId
+ * Verify every Catalog V3 voucher against Wix and repair what can be repaired:
+ * missing inventory item → created (inStock:true); wrong/missing variant id →
+ * adopted from the product. Reports the rest (missing product, zero price).
+ * Read-then-fix; never touches purchases or wallets.
+ */
+const repairVouchersController = async (req, res) => {
+  try {
+    const { shopId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(shopId)) return res.status(400).json({ success: false, message: "Invalid ID" });
+    const shop = await shopModel.findById(shopId);
+    if (!shop) return res.status(404).json({ success: false, message: "Shop not found" });
+    let token = shop.accessToken;
+    if (!token || !shop.tokenExpiry || shop.tokenExpiry <= Date.now() + 60000) {
+      const fresh = await handleWixInstall({ instanceId: shop.instanceId });
+      token = fresh?.accessToken || token;
+    }
+    const report = [];
+    let changed = false;
+    for (const v of shop.vouchers) {
+      if (!v.wixProductId) { report.push({ voucherId: String(v._id), status: "no_product" }); continue; }
+      if (!wixCatalog.isV3(v.catalogVersion)) { report.push({ voucherId: String(v._id), status: "v1_skipped" }); continue; }
+      try {
+        const r = await wixCatalog.verifyV3Purchasable({ token, productId: v.wixProductId, variantId: v.wixVariantId, expectedPrice: v.price });
+        if (r.ok) {
+          if (r.variantId !== v.wixVariantId) { v.wixVariantId = r.variantId; changed = true; }
+          report.push({ voucherId: String(v._id), status: "ok", repaired: r.repaired, variantId: r.variantId, wixPrice: r.price, voucherPrice: v.price, availability: r.availability });
+        } else {
+          report.push({ voucherId: String(v._id), status: r.code, message: r.message, state: r.state });
+        }
+      } catch (e) {
+        report.push({ voucherId: String(v._id), status: "error", error: wixCatalog.wixErrorInfo(e) });
+      }
+    }
+    if (changed) await shop.save();
+    console.log("[VOUCHER REPAIR]", { shopId, results: report.map((r) => `${r.voucherId}:${r.status}${r.repaired ? "(repaired)" : ""}`) });
+    return res.status(200).json({ success: true, report });
+  } catch (error) {
+    console.error("[VOUCHER REPAIR] failed", error.message);
+    return res.status(500).json({ success: false, message: "Something went wrong" });
+  }
+};
+
 const deleteAdminController = async (req, res) => {
   try {
     const shop = req.headers["x-shopify-shop-domain"];
@@ -1097,6 +1152,7 @@ module.exports = {
   checkAppBillingController,
   voucherHandlerController,
   updatesVoucherController,
+  repairVouchersController,
   getWithdrawalRequest,
   updateConsultantWidthrawalRequest,
   declineWithdrawalRequest,

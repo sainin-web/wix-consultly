@@ -5,6 +5,7 @@ const { shopModel } = require("../Modal/shopify");
 const { User } = require("../Modal/userSchema");
 const { WalletHistory } = require("../Modal/walletHistory");
 const wixEcom = require("./wixEcom");
+const wixCatalog = require("./wixCatalog");
 
 /*
  * Voucher purchase lifecycle — the server is the only authority.
@@ -110,6 +111,21 @@ async function createPurchase({ user, claims, voucherId }) {
   console.log("[VOUCHER PURCHASE] Pending purchase created:", purchase.purchaseId);
 
   try {
+    // Catalog V3: read the product back and refuse to build a checkout that Wix
+    // would show as "sold out" / $0.00. Repairs missing inventory and a stale
+    // variant id on the way (persisted on the voucher for next time).
+    if (wixCatalog.isV3(voucher.catalogVersion)) {
+      const token = await wixEcom.tokenFor(shop.instanceId);
+      const check = await wixCatalog.verifyV3Purchasable({ token, productId: voucher.wixProductId, variantId: voucher.wixVariantId, expectedPrice: price, log: (...a) => console.log("[VOUCHER PURCHASE]", ...a) });
+      console.log("[VOUCHER PURCHASE] Wix product verification", { purchaseId: purchase.purchaseId, ok: check.ok, code: check.code || null, variantId: check.variantId || null, wixPrice: check.price ?? null, availability: check.availability || null, repaired: Boolean(check.repaired) });
+      if (!check.ok) { const e = new Error(check.code); e.code = check.code; e.detail = check.message; e.status = 409; throw e; }
+      if (check.variantId && check.variantId !== voucher.wixVariantId) {
+        voucher.wixVariantId = check.variantId;
+        await shop.save();
+        console.log("[VOUCHER PURCHASE] Voucher variant id corrected from Wix", { voucherId: String(voucher._id), variantId: check.variantId });
+      }
+      purchase.voucherSnapshot.wixVariantId = check.variantId;
+    }
     const { checkoutId, purchaseFlowId, checkoutUrl } = await wixEcom.createVoucherCheckout({ instanceId: shop.instanceId, voucher: purchase.voucherSnapshot });
     purchase.wixCheckoutId = checkoutId;
     purchase.wixPurchaseFlowId = purchaseFlowId;
@@ -120,11 +136,12 @@ async function createPurchase({ user, claims, voucherId }) {
   } catch (e) {
     purchase.status = "FAILED";
     purchase.failedAt = new Date();
-    purchase.lastError = `checkout:${e.detail || e.message}`;
+    purchase.lastError = `${e.code || "checkout"}:${e.detail || e.message}`;
     await purchase.save();
     console.error("[VOUCHER PURCHASE] Checkout creation failed", { purchaseId: purchase.purchaseId, error: e.detail || e.message });
     const permission = e.status === 403;
-    return { ok: false, status: 502, code: permission ? "wix_permission" : "checkout_failed", message: permission ? "The store is not configured for checkout yet. Please contact the site owner." : "We could not start the checkout. Please try again in a moment." };
+    if (e.status === 409 && e.code) return { ok: false, status: 409, code: e.code, message: `${e.detail} Please contact the site owner.` };
+    return { ok: false, status: 502, code: permission ? "wix_permission" : "checkout_failed", message: permission ? "The store is not configured for checkout yet. Please contact the site owner." : (e.detail && e.code === "checkout_line_unavailable" ? e.detail : "We could not start the checkout. Please try again in a moment.") };
   }
 }
 

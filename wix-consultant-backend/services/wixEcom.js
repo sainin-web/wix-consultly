@@ -75,14 +75,20 @@ async function createVoucherCheckout({ instanceId, voucher }) {
   }
   console.log("[WIX CHECKOUT] line item", { catalog: isV3(voucher.catalogVersion) ? "V3" : "V1", productId: voucher.wixProductId, variantId: catalogReference.options?.variantId || null });
   let checkout;
+  const request = { channelType: "WEB", lineItems: [{ quantity: 1, catalogReference }] };
+  console.log("[WIX CHECKOUT] Create Checkout request", { instanceId, request });
   try {
-    const { data } = await axios.post(
-      `${API}/ecom/v1/checkouts`,
-      { channelType: "WEB", lineItems: [{ quantity: 1, catalogReference }] },
-      { headers: headers(token) },
-    );
+    const { data } = await axios.post(`${API}/ecom/v1/checkouts`, request, { headers: headers(token) });
     checkout = data?.checkout;
+    const lines = (checkout?.lineItems || []).map((li) => ({ id: li.id, catalogItemId: li.catalogReference?.catalogItemId, variantId: li.catalogReference?.options?.variantId, quantity: li.quantity, price: li.price?.amount, availability: li.availability?.status, name: li.productName?.original }));
+    console.log("[WIX CHECKOUT] Create Checkout response", { checkoutId: checkout?.id || checkout?._id, currency: checkout?.currency, total: checkout?.priceSummary?.total?.amount, lines });
+    // If Wix dropped/zeroed the line, the checkout page would show "sold out" and $0.00 — refuse it here.
+    const bad = lines.find((l) => (l.availability && l.availability !== "AVAILABLE") || (l.price !== undefined && Number(l.price) <= 0));
+    if (lines.length === 0 || bad) {
+      const err = new Error("checkout_line_unavailable"); err.code = "checkout_line_unavailable"; err.detail = `The store reports this voucher as unavailable (${bad?.availability || "no line items"}, price ${bad?.price ?? "n/a"}).`; throw err;
+    }
   } catch (e) {
+    if (e.code === "checkout_line_unavailable") { console.error("[WIX CHECKOUT] line item unavailable:", e.detail); throw e; }
     console.error("[WIX CHECKOUT] create failed:", errInfo(e));
     const err = new Error("wix_checkout_failed"); err.status = e.response?.status; err.detail = errInfo(e); throw err;
   }
@@ -104,6 +110,9 @@ async function createVoucherCheckout({ instanceId, voucher }) {
   return { checkoutId: String(checkoutId), purchaseFlowId: checkout?.purchaseFlowId || null, checkoutUrl };
 }
 
+/** Token for an installed instance (exported for pre-checkout product verification). */
+const tokenFor = (instanceId) => instanceToken(instanceId);
+
 /** Server-to-server order verification (never trust the webhook body alone). */
 async function getOrder({ instanceId, orderId }) {
   const token = await instanceToken(instanceId);
@@ -111,4 +120,4 @@ async function getOrder({ instanceId, orderId }) {
   return data?.order || null;
 }
 
-module.exports = { createVoucherCheckout, getOrder, findInstalledShop, WIX_STORES_APP_ID, API };
+module.exports = { createVoucherCheckout, getOrder, findInstalledShop, tokenFor, WIX_STORES_APP_ID, API };

@@ -11,6 +11,7 @@ const {
   checkAppBillingController,
   voucherHandlerController,
   updatesVoucherController,
+  repairVouchersController,
   getWithdrawalRequest,
   updateConsultantWidthrawalRequest,
   declineWithdrawalRequest,
@@ -43,6 +44,7 @@ adminRoute.post("/app-enable-and-disable/:adminId", requireAdminAuth, appEnableA
 adminRoute.get("/shop/billing-status/:adminId", requireAdminAuth, checkAppBillingController);
 adminRoute.delete("/delete/voucher/:shopId/:voucherId", requireAdminAuth, voucherHandlerController);
 adminRoute.put("/admin/voucher-updates/:shopId/:voucherId", requireAdminAuth, updatesVoucherController);
+adminRoute.put("/admin/voucher-repair/:shopId", requireAdminAuth, repairVouchersController);
 adminRoute.get("/withdrawal-requests/:adminId", requireAdminAuth, getWithdrawalRequest);
 adminRoute.put("/update/widthrwal/req/:adminId", requireAdminAuth, updateConsultantWidthrawalRequest);
 adminRoute.put("/declin/widthrwal/req/:transactionId", requireAdminAuth, declineWithdrawalRequest);

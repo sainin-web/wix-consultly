@@ -3,7 +3,7 @@ const { shopModel } = require("../Modal/shopify");
 const { resolveWixInstanceFromToken } = require("../services/wixInstanceFromToken");
 const { User } = require("../Modal/userSchema");
 const { WalletHistory } = require("../Modal/walletHistory");
-const { parsePage, pageMeta } = require("../utils/paginate");
+const { parsePage, pageMeta } = require("../Utils/paginate");
 const { CallSession } = require("../Modal/callSessions");
 const { TransactionHistroy } = require("../Modal/transactionHistroy");
 

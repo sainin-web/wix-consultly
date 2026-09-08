@@ -1,5 +1,5 @@
 const svc = require("../services/voucherPurchase");
-const { parsePage } = require("../utils/paginate");
+const { parsePage } = require("../Utils/paginate");
 
 /**
  * POST /api/vouchers/purchase          { voucherId }        → { purchaseId, checkoutUrl }

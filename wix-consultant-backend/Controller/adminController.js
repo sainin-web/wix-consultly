@@ -9,6 +9,7 @@ const jwt = require("jsonwebtoken");
 
 const dotenv = require("dotenv");
 const { handleWixInstall } = require("../services/wix.service");
+const wixCatalog = require("../services/wixCatalog");
 const {
   resolveWixInstanceFromToken,
 } = require("../services/wixInstanceFromToken");
@@ -260,124 +261,89 @@ const voucherController = async (req, res) => {
       });
     }
 
-    if (!admin.accessToken) {
+    console.log("[VOUCHER CREATE] Starting voucher creation", { adminId, totalCoin, extraCoin, price });
+    console.log("[VOUCHER CREATE] Instance:", admin.instanceId);
+
+    // Token may be missing/expired since install → refresh through the install
+    // service for this existing instance. Still nothing → cannot talk to Wix.
+    let token = admin.accessToken;
+    if (!token || !admin.tokenExpiry || admin.tokenExpiry <= Date.now() + 60000) {
+      try {
+        const fresh = await handleWixInstall({ instanceId: admin.instanceId });
+        token = fresh?.accessToken || token;
+      } catch (tokenError) {
+        console.error("[VOUCHER CREATE] Token refresh failed", tokenError.message);
+      }
+    }
+    if (!token) {
       return res.status(400).json({
         success: false,
         message: "Admin Wix access token is missing",
       });
     }
 
-    let catalogVersion = "V1";
-
+    // Catalog version decides the product API. V3_CATALOG → V3 endpoints, never V1.
+    let catalogVersion;
     try {
-      const versionRes = await axios.get(
-        "https://www.wixapis.com/stores/v3/provision/version",
-        {
-          headers: {
-            Authorization: admin.accessToken,
-            "Content-Type": "application/json",
-          },
-        },
-      );
-
-      catalogVersion = versionRes.data.catalogVersion || "V1";
+      const cv = await wixCatalog.getCatalogVersion(token);
+      catalogVersion = cv.version;
+      console.log("[VOUCHER CREATE] Catalog version:", cv.raw || "(empty)", "→", catalogVersion);
     } catch (versionError) {
-      console.log(
-        "Catalog version check failed, defaulting to V1:",
-        versionError.response?.data || versionError.message,
-      );
+      console.warn("[VOUCHER CREATE] Catalog version check failed → defaulting to V1", wixCatalog.wixErrorInfo(versionError));
+      catalogVersion = "V1";
+    }
+    if (catalogVersion === "NONE") {
+      return res.status(409).json({ success: false, code: "stores_not_installed", message: "Wix Stores is not installed on this site. Install Wix Stores, then create the voucher again." });
     }
 
-    console.log("Wix Catalog Version:", catalogVersion);
-
-    let wixProduct;
-
-    if (catalogVersion === "V3") {
-      const wixResponse = await axios.post(
-        "https://www.wixapis.com/stores/v3/products",
-        {
-          product: {
-            name: `${totalCoin} Coins Voucher`,
-
-            description: `Get ${totalCoin} coins + ${extraCoin} bonus coins`,
-
-            productType: "digital",
-
-            visible: true,
-
-            variants: [
-              {
-                price: {
-                  basePrice: Number(price),
-                },
-              },
-            ],
-          },
-        },
-        {
-          headers: {
-            Authorization: admin.accessToken,
-            "Content-Type": "application/json",
-          },
-        },
-      );
-
-      wixProduct = wixResponse.data.product;
-    } else {
-      const wixResponse = await axios.post(
-        "https://www.wixapis.com/stores/v1/products",
-        {
-          product: {
-            name: `${totalCoin} Coins Voucher`,
-
-            description: `Get ${totalCoin} coins + ${extraCoin} bonus coins`,
-
-            priceData: {
-              price: Number(price),
-            },
-
-            productType: "physical",
-
-            visible: true,
-          },
-        },
-        {
-          headers: {
-            Authorization: admin.accessToken,
-            "Content-Type": "application/json",
-          },
-        },
-      );
-
-      wixProduct = wixResponse.data.product;
+    const productName = String(req.body.name || "").trim() || `${totalCoin} Coins Voucher`;
+    const productDescription = `Get ${totalCoin} coins + ${extraCoin} bonus coins`;
+    const created = await wixCatalog.createVoucherProduct({ token, version: catalogVersion, name: productName, description: productDescription, price });
+    if (!created.productId) {
+      console.error("[VOUCHER CREATE] Wix API returned no product id — voucher NOT saved");
+      return res.status(502).json({ success: false, message: "Wix did not return a product id" });
     }
-
-    console.log("Wix Product Created:", wixProduct);
+    console.log("[VOUCHER CREATE] Wix product created:", created.productId, { catalog: catalogVersion, variantId: created.variantId || null });
 
     const voucher = {
       voucherCode: voucherCode || "",
+      name: req.body.name ? productName : "",
+      active: true,
       totalCoin,
       extraCoin,
       price,
-      wixProductId: wixProduct._id || wixProduct.id,
-      wixProductSlug: wixProduct.slug,
+      wixProductId: created.productId,
+      wixProductSlug: created.slug,
+      wixVariantId: created.variantId || undefined,
       catalogVersion,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
 
-    console.log("voucher______________", voucher);
     admin.vouchers.push(voucher);
-    await admin.save();
+    try {
+      await admin.save();
+    } catch (dbError) {
+      // Never leave a purchasable product that no voucher points to.
+      console.error("[VOUCHER CREATE] DB save failed after Wix product creation — cleaning up orphan product", { productId: created.productId, error: dbError.message });
+      try {
+        await wixCatalog.deleteVoucherProduct({ token, version: catalogVersion, productId: created.productId });
+        console.log("[VOUCHER CREATE] Orphan Wix product deleted", created.productId);
+      } catch (cleanupError) {
+        console.error("[VOUCHER CREATE] ORPHAN Wix product could not be deleted — delete it manually in the Wix dashboard", { productId: created.productId, ...wixCatalog.wixErrorInfo(cleanupError) });
+      }
+      throw dbError;
+    }
+    console.log("[VOUCHER CREATE] Voucher saved with wixProductId", { voucherId: String(admin.vouchers[admin.vouchers.length - 1]._id), wixProductId: created.productId });
 
     return res.status(201).json({
       success: true,
       message: "Voucher + Wix Product created",
-
-      data: voucher,
+      // the saved sub-document (has _id) — the admin UI edits/deletes by id
+      data: admin.vouchers[admin.vouchers.length - 1],
     });
   } catch (error) {
-    console.log("Voucher create error", error.response?.data || error.message);
+    console.error("[VOUCHER CREATE] Wix API failed", wixCatalog.wixErrorInfo(error));
 
     /*
       ============================
@@ -797,9 +763,30 @@ const voucherHandlerController = async (req, res) => {
         .json({ success: false, message: "Shop not found" });
     }
 
+    const target = shop.vouchers.id(voucherId);
+    if (!target) return res.status(404).json({ success: false, message: "Voucher not found" });
+
+    // Delete the store product first so no orphan stays purchasable. If Wix
+    // refuses (other than 404), keep the voucher so the admin can retry.
+    if (target.wixProductId) {
+      let token = shop.accessToken;
+      if (!shop.tokenExpiry || shop.tokenExpiry <= Date.now() + 60000) {
+        const fresh = await handleWixInstall({ instanceId: shop.instanceId });
+        token = fresh?.accessToken || token;
+      }
+      try {
+        const r = await wixCatalog.deleteVoucherProduct({ token, version: target.catalogVersion, productId: target.wixProductId });
+        console.log("[VOUCHER DELETE] Wix product", r.alreadyGone ? "already gone" : "deleted", { productId: target.wixProductId });
+      } catch (wixError) {
+        console.error("[VOUCHER DELETE] Wix API failed — voucher kept", wixCatalog.wixErrorInfo(wixError));
+        return res.status(502).json({ success: false, code: "wix_delete_failed", message: "The store product could not be deleted. The voucher was kept so you can retry.", wixError: wixCatalog.wixErrorInfo(wixError) });
+      }
+    }
+
     shop.vouchers = shop.vouchers.filter((v) => v._id.toString() !== voucherId);
 
     await shop.save();
+    console.log("[VOUCHER DELETE] Voucher removed", { voucherId });
 
     return res.status(200).json({
       success: true,
@@ -847,7 +834,35 @@ const updatesVoucherController = async (req, res) => {
       });
     }
 
-    if (totalCoin !== undefined) voucher.totalCoin = totalCoin;
+    // Price follows totalCoin (existing convention). Push name/price to the
+    // Wix product FIRST using the voucher's own catalog version; only then
+    // persist, so the store and the voucher never disagree.
+    const priceChanged = totalCoin !== undefined && Number(totalCoin) !== Number(voucher.price);
+    const nameChanged = name !== undefined && String(name || "").trim() !== String(voucher.name || "");
+    if (voucher.wixProductId && (priceChanged || nameChanged)) {
+      let token = shop.accessToken;
+      if (!shop.tokenExpiry || shop.tokenExpiry <= Date.now() + 60000) {
+        const fresh = await handleWixInstall({ instanceId: shop.instanceId });
+        token = fresh?.accessToken || token;
+      }
+      console.log("[VOUCHER UPDATE] Syncing Wix product", { voucherId, catalog: wixCatalog.normalizeCatalogVersion(voucher.catalogVersion), priceChanged, nameChanged });
+      try {
+        const r = await wixCatalog.updateVoucherProduct({
+          token,
+          version: voucher.catalogVersion,
+          productId: voucher.wixProductId,
+          name: nameChanged ? (String(name || "").trim() || `${totalCoin ?? voucher.totalCoin} Coins Voucher`) : undefined,
+          price: priceChanged ? Number(totalCoin) : undefined,
+        });
+        if (r.variantId && !voucher.wixVariantId) voucher.wixVariantId = r.variantId;
+        console.log("[VOUCHER UPDATE] Wix product updated", { productId: voucher.wixProductId });
+      } catch (wixError) {
+        console.error("[VOUCHER UPDATE] Wix API failed — voucher NOT changed", wixCatalog.wixErrorInfo(wixError));
+        return res.status(502).json({ success: false, code: "wix_update_failed", message: "The store product could not be updated. No changes were saved.", wixError: wixCatalog.wixErrorInfo(wixError) });
+      }
+    }
+
+    if (totalCoin !== undefined) { voucher.totalCoin = totalCoin; voucher.price = Number(totalCoin); }
     if (extraCoin !== undefined) voucher.extraCoin = extraCoin;
     if (name !== undefined) voucher.name = String(name || "").trim();
     if (active !== undefined) voucher.active = Boolean(active);

@@ -29,6 +29,7 @@ const voucherPurchaseSchema = new mongoose.Schema(
       totalCoin: Number,
       extraCoin: Number,
       wixProductId: String,
+      wixVariantId: String,
       catalogVersion: String,
     },
 

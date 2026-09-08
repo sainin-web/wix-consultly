@@ -100,7 +100,7 @@ async function createPurchase({ user, claims, voucherId }) {
       name: voucher.name || `${totalCoin} credits pack`,
       description: extraCoin ? `${totalCoin} credits + ${extraCoin} bonus` : `${totalCoin} credits`,
       price, currency, credits, totalCoin, extraCoin,
-      wixProductId: voucher.wixProductId, catalogVersion: voucher.catalogVersion || "V1",
+      wixProductId: voucher.wixProductId, wixVariantId: voucher.wixVariantId || undefined, catalogVersion: voucher.catalogVersion || "V1",
     },
     amount: price,
     currency,

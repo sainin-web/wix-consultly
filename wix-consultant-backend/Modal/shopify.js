@@ -29,7 +29,8 @@ const shop = new mongoose.Schema({
       extraCoin: Number,
       wixProductId: String,
       wixProductSlug: String,
-      catalogVersion: String,
+      wixVariantId: String, // Catalog V3 default variant (needed for checkout catalogReference.options)
+      catalogVersion: String, // "V1" | "V3" (normalized from V1_CATALOG / V3_CATALOG)
       price: Number,
       createdAt: { type: Date, default: Date.now },
       updatedAt: { type: Date, default: Date.now },

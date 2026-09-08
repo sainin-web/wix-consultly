@@ -1,6 +1,7 @@
 const axios = require("axios");
 const { handleWixInstall } = require("./wix.service");
 const { shopModel } = require("../Modal/shopify");
+const { isV3 } = require("./wixCatalog");
 
 /**
  * Thin, documented client for the Wix eCommerce REST APIs used by the voucher
@@ -63,11 +64,16 @@ async function findV3VariantId(token, productId) {
  */
 async function createVoucherCheckout({ instanceId, voucher }) {
   const token = await instanceToken(instanceId);
+  // Catalog V3 line items reference the product id plus the default variant
+  // id in catalogReference.options.variantId (Catalog V3 ↔ eCommerce
+  // integration). V1 line items use the product id alone.
   const catalogReference = { appId: WIX_STORES_APP_ID, catalogItemId: voucher.wixProductId };
-  if (voucher.catalogVersion === "V3") {
-    const variantId = await findV3VariantId(token, voucher.wixProductId);
+  if (isV3(voucher.catalogVersion)) {
+    const variantId = voucher.wixVariantId || (await findV3VariantId(token, voucher.wixProductId));
     if (variantId) catalogReference.options = { variantId };
+    else console.warn("[WIX CHECKOUT] V3 product without a resolvable default variant", { productId: voucher.wixProductId });
   }
+  console.log("[WIX CHECKOUT] line item", { catalog: isV3(voucher.catalogVersion) ? "V3" : "V1", productId: voucher.wixProductId, variantId: catalogReference.options?.variantId || null });
   let checkout;
   try {
     const { data } = await axios.post(
